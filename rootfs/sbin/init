@@ -1,0 +1,28 @@
+#!/bin/sh
+# StickOS startup (pid 1). The SD data partition is already mounted on /sd.
+export PATH=/bin:/usr/bin LD_LIBRARY_PATH=/usr/lib/arm-linux-gnueabihf HOME=/tmp
+mount -t proc proc /proc
+mount -t sysfs sysfs /sys
+if ! mount -t devtmpfs devtmpfs /dev; then
+    mount -t tmpfs tmpfs /dev
+    mdev -s
+fi
+mkdir -p /dev/pts
+mount -t devpts devpts /dev/pts
+mount -t tmpfs tmpfs /tmp
+for g in /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor; do
+    echo performance > "$g"
+done 2>/dev/null
+D=/sd/stickos/logs
+mkdir -p $D
+# logs written by older versions directly in stickos/
+mv -n /sd/stickos/*.log $D/ 2>/dev/null
+L=$D/init.log
+echo "StickOS: started $(date)" > $L
+(sleep 15; dmesg > $D/dmesg.log; sync) &
+while :; do
+    /usr/bin/stickui
+    echo "stickui exited with code $?" >> $L
+    sync
+    sleep 2
+done

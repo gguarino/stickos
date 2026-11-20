@@ -1,0 +1,11 @@
+# build output (the release images are copied to images/)
+out/
+# logs copied from the stick
+logs/
+# copyrighted BIOS files and games are never committed
+sd/bios/*
+!sd/bios/_README.txt
+sd/roms/*/*
+!sd/roms/*/_README.txt
+*.bak
+__pycache__/
