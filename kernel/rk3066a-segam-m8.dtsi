@@ -68,7 +68,7 @@
 	status = "okay";
 };
 
-/* started by kjump: resets the stick if the new kernel hangs */
+/* with "kjump -w" it is already running: resets the stick if the new kernel hangs */
 &wdt {
 	status = "okay";
 };

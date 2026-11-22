@@ -46,7 +46,8 @@ stickos/kernel/always         empty file: use the new kernel at every start
 
 `try` is renamed to `tried` before jumping: if the new kernel does not work, switch the
 stick off and on and the stock kernel is back.
-The watchdog resets the stick after about 28 s if the new kernel hangs; the log it left
+With an empty `stickos/kernel/watchdog` file the watchdog resets the stick after about
+28 s if the new kernel hangs; the log it left
 in RAM is then saved as `stickos/logs/ramoops.bin` (`tried` becomes `done`).
 Logs: `stickos/logs/kjump.log`, `dmesg-stock.log`, `dmesg-new.log`.
 

@@ -3,7 +3,7 @@
  * without writing to the flash. If anything goes wrong, power cycle: the stick starts
  * as before.
  *
- *   kjump ZIMAGE DTB INITRD
+ *   kjump [-w] ZIMAGE DTB INITRD    -w: start the watchdog (resets if the kernel hangs)
  *   kjump -t          only test that code can run in kernel mode
  *   kjump -d FILE     save the log left in RAM by the new kernel, if any
  *
@@ -49,6 +49,7 @@
 #endif
 #define NRSYS   223                     /* unused on every ARM kernel */
 #define OOPSOFF (AREALEN - 0x200000ul)  /* ramoops of the new kernel, 1 MB */
+#define MARK    0x4b4a4d50              /* at the end of AREA: tells if it survives a reset */
 #define STUBOFF (AREALEN - 0x220000ul)  /* code and parameters, before ramoops (0x6fe00000) */
 
 /* where the images go */
@@ -273,7 +274,9 @@ static int dump(const char *path)
     for (unsigned long o = 0; o < 0x100000; o += 0x10000)
         if (!memcmp(m + OOPSOFF + o, "DBGC", 4))
             found++;
-    say("ramoops zones found: %d (first word 0x%08x)", found, first);
+    uint32_t mark = *(uint32_t *)(m + AREALEN - 4);
+    say("ramoops zones found: %d (first word 0x%08x), mark 0x%08x: memory %s", found, first, mark,
+        mark == MARK ? "kept" : "lost or cleared");
     if (!found)
         return 1;
     FILE *f = fopen(path, "wb");
@@ -306,6 +309,12 @@ static void table_set(unsigned nr, uint32_t v)
 
 int main(int argc, char **argv)
 {
+    int wd = argc > 1 && !strcmp(argv[1], "-w");
+    if (wd) {
+        argv++;
+        argc--;
+    }
+    (void)wd;
     int test = argc > 1 && !strcmp(argv[1], "-t");
     if (argc == 3 && !strcmp(argv[1], "-d"))
         return dump(argv[2]);
@@ -375,6 +384,7 @@ int main(int argc, char **argv)
     }
     unsigned char *zs = area + SHOWN, *ds = zs + zw, *is = ds + dw;
     memset(area + OOPSOFF, 0, 0x100000);        /* no leftovers from earlier attempts */
+    *(volatile uint32_t *)(area + AREALEN - 4) = MARK;
     memcpy(zs, z, zw);
     memcpy(ds, d, dw);
     memcpy(is, in, iw);
@@ -406,9 +416,11 @@ int main(int argc, char **argv)
         p.list[n++] = usb[i] + 0x010; p.list[n++] = 1;
     }
     /* watchdog: resets the stick after about 28 s, unless the new kernel takes it over */
+    if (wd) {
     p.list[n++] = 0x2004c004; p.list[n++] = 0xff;
     p.list[n++] = 0x2004c00c; p.list[n++] = 0x76;
     p.list[n++] = 0x2004c000; p.list[n++] = 0x1d;
+    }
 #endif
     p.list[n++] = 0;
     p.copies = base + n * 4;

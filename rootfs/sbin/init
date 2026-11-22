@@ -33,7 +33,7 @@ case $(uname -r) in 3.0.36*)
         [ -f $K/try ] && mv $K/try $K/tried
         sync
         dmesg > $D/dmesg-stock.log
-        kjump $K/zImage $K/stick.dtb $K/initrd > $D/kjump.log 2>&1
+        kjump $([ -f $K/watchdog ] && echo -w) $K/zImage $K/stick.dtb $K/initrd > $D/kjump.log 2>&1
         echo "kjump exited with code $?" >> $L      # only if it failed
         sync
     fi ;;
