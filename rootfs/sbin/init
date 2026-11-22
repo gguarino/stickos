@@ -18,7 +18,23 @@ mkdir -p $D
 # logs written by older versions directly in stickos/
 mv -n /sd/stickos/*.log $D/ 2>/dev/null
 L=$D/init.log
-echo "StickOS: started $(date)" > $L
+echo "StickOS: started $(date), kernel $(uname -r)" > $L
+# New kernel, if present on the SD: started from the stock kernel without touching the flash.
+# One attempt only: the file "try" is renamed before jumping, so after a failed start a
+# power cycle gives back the stock kernel. "always" = at every start (once it works).
+K=/sd/stickos/kernel
+case $(uname -r) in 3.0.36*)
+    if [ -f $K/zImage ] && [ -f $K/stick.dtb ] && [ -f $K/initrd ] && { [ -f $K/try ] || [ -f $K/always ]; }; then
+        [ -f $K/try ] && mv $K/try $K/tried
+        sync
+        dmesg > $D/dmesg-stock.log
+        kjump $K/zImage $K/stick.dtb $K/initrd > $D/kjump.log 2>&1
+        echo "kjump exited with code $?" >> $L      # only if it failed
+        sync
+    fi ;;
+*)
+    dmesg > $D/dmesg-new.log; sync ;;               # early copy, in case something hangs later
+esac
 (sleep 15; dmesg > $D/dmesg.log; sync) &
 while :; do
     /usr/bin/stickui

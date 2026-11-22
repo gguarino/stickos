@@ -1,0 +1,53 @@
+// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
+/* Full version: KMS display, HDMI audio, GPU. */
+/dts-v1/;
+#include "rk3066a-segam-m8.dtsi"
+
+/ {
+	model = "SEGAM M8 V5.0";
+
+	chosen {
+		bootargs = "console=ttyS2,115200 console=tty0 loglevel=8 clk_ignore_unused video=HDMI-A-1:1280x720-16@60 rdinit=/init";
+	};
+
+	hdmi-con {
+		compatible = "hdmi-connector";
+		type = "a";
+
+		port {
+			hdmi_con_in: endpoint {
+				remote-endpoint = <&hdmi_out_con>;
+			};
+		};
+	};
+};
+
+&gpu {
+	status = "okay";
+};
+
+&hdmi {
+	status = "okay";
+};
+
+&hdmi_in_vop1 {
+	status = "disabled";
+};
+
+&hdmi_out {
+	hdmi_out_con: endpoint {
+		remote-endpoint = <&hdmi_con_in>;
+	};
+};
+
+&hdmi_sound {
+	status = "okay";
+};
+
+&i2s0 {
+	status = "okay";
+};
+
+&vop0 {
+	status = "okay";
+};

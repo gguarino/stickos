@@ -1,0 +1,39 @@
+// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
+/* First bring-up: the picture set up by the stock kernel is kept (1280x720 RGB565) and
+ * used as console. No display driver, no HDMI audio. */
+/dts-v1/;
+#include "rk3066a-segam-m8.dtsi"
+
+/ {
+	model = "SEGAM M8 V5.0 (simplefb)";
+
+	chosen {
+		#address-cells = <1>;
+		#size-cells = <1>;
+		ranges;
+		bootargs = "console=ttyS2,115200 console=tty0 loglevel=8 clk_ignore_unused pd_ignore_unused regulator_ignore_unused maxcpus=1 rdinit=/init";
+
+		framebuffer@6f400000 {
+			compatible = "simple-framebuffer";
+			reg = <0x6f400000 (1280 * 720 * 2)>;
+			width = <1280>;
+			height = <720>;
+			stride = <2560>;
+			format = "r5g6b5";
+			status = "okay";
+		};
+	};
+
+	reserved-memory {
+		stock_fb: framebuffer@6f400000 {
+			reg = <0x6f400000 0x400000>;
+			no-map;
+		};
+	};
+};
+
+/* the stock LCDC keeps scanning the framebuffer */
+&vop0 {
+	status = "disabled";
+};
+

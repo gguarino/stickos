@@ -1,0 +1,290 @@
+drm/rockchip: rk3066_hdmi: add audio
+
+Based on the never merged series by Zheng Yang and Johan Jonker ("drm/rockchip:
+rk3066_hdmi: add sound support", v7, June 2024), ported to the DRM bridge HDMI audio
+operations of Linux 6.18. The audio settings come from that series.
+
+--- a/drivers/gpu/drm/rockchip/Kconfig
++++ b/drivers/gpu/drm/rockchip/Kconfig
+@@ -144,6 +144,7 @@
+ 	depends on DRM_ROCKCHIP
+ 	select DRM_DISPLAY_HELPER
+ 	select DRM_BRIDGE_CONNECTOR
++	select SND_SOC_HDMI_CODEC if SND_SOC
+ 	help
+ 	  This selects support for Rockchip SoC specific extensions
+ 	  for the RK3066 HDMI driver. If you want to enable
+--- a/drivers/gpu/drm/rockchip/rk3066_hdmi.c
++++ b/drivers/gpu/drm/rockchip/rk3066_hdmi.c
+@@ -18,12 +18,22 @@
+ #include <linux/platform_device.h>
+ #include <linux/regmap.h>
+ 
++#include <sound/hdmi-codec.h>
++
+ #include "rk3066_hdmi.h"
+ 
+ #include "rockchip_drm_drv.h"
+ 
+ #define DEFAULT_PLLA_RATE 30000000
+ 
++struct rk3066_hdmi_audio {
++	unsigned int channels;
++	unsigned int rate;
++	unsigned int width;
++	bool active;	/* a stream is configured */
++	bool muted;
++};
++
+ struct hdmi_data_info {
+ 	int vic; /* The CEA Video ID (VIC) of the current drm display mode. */
+ 	unsigned int enc_out_format;
+@@ -58,6 +68,7 @@
+ 	unsigned int tmdsclk;
+ 
+ 	struct hdmi_data_info hdmi_data;
++	struct rk3066_hdmi_audio audio;
+ };
+ 
+ static struct rk3066_hdmi *bridge_to_rk3066_hdmi(struct drm_bridge *bridge)
+@@ -162,13 +173,17 @@
+ {
+ 	struct rk3066_hdmi *hdmi = bridge_to_rk3066_hdmi(bridge);
+ 
+-	if (type != HDMI_INFOFRAME_TYPE_AVI) {
+-		drm_err(bridge->dev, "Unsupported infoframe type: %u\n", type);
+-		return 0;
++	switch (type) {
++	case HDMI_INFOFRAME_TYPE_AVI:
++		hdmi_writeb(hdmi, HDMI_CP_BUF_INDEX, HDMI_INFOFRAME_AVI);
++		break;
++	case HDMI_INFOFRAME_TYPE_AUDIO:
++		hdmi_writeb(hdmi, HDMI_CP_BUF_INDEX, HDMI_INFOFRAME_AAI);
++		break;
++	default:
++		drm_dbg_kms(bridge->dev, "Unsupported infoframe type: %u\n", type);
+ 	}
+ 
+-	hdmi_writeb(hdmi, HDMI_CP_BUF_INDEX, HDMI_INFOFRAME_AVI);
+-
+ 	return 0;
+ }
+ 
+@@ -180,8 +195,9 @@
+ 	struct rk3066_hdmi *hdmi = bridge_to_rk3066_hdmi(bridge);
+ 	ssize_t i;
+ 
+-	if (type != HDMI_INFOFRAME_TYPE_AVI) {
+-		drm_err(bridge->dev, "Unsupported infoframe type: %u\n", type);
++	if (type != HDMI_INFOFRAME_TYPE_AVI &&
++	    type != HDMI_INFOFRAME_TYPE_AUDIO) {
++		drm_dbg_kms(bridge->dev, "Unsupported infoframe type: %u\n", type);
+ 		return 0;
+ 	}
+ 
+@@ -193,6 +209,163 @@
+ 	return 0;
+ }
+ 
++/* audio capture logic must be reset for new settings to take effect in mode E */
++static void rk3066_hdmi_audio_reset(struct rk3066_hdmi *hdmi)
++{
++	if (rk3066_hdmi_get_power_mode(hdmi) != HDMI_SYS_POWER_MODE_E)
++		return;
++
++	hdmi_modb(hdmi, HDMI_VIDEO_CTRL2, HDMI_AUDIO_CP_LOGIC_RESET_MASK,
++		  HDMI_AUDIO_CP_LOGIC_RESET);
++	usleep_range(900, 1000);
++	hdmi_modb(hdmi, HDMI_VIDEO_CTRL2, HDMI_AUDIO_CP_LOGIC_RESET_MASK, 0);
++}
++
++static int rk3066_hdmi_audio_config(struct rk3066_hdmi *hdmi)
++{
++	struct rk3066_hdmi_audio *audio = &hdmi->audio;
++	u32 rate, channel, word_length, n, cts;
++
++	if (audio->channels < 3)
++		channel = HDMI_AUDIO_I2S_CHANNEL_1_2;
++	else if (audio->channels < 5)
++		channel = HDMI_AUDIO_I2S_CHANNEL_3_4;
++	else if (audio->channels < 7)
++		channel = HDMI_AUDIO_I2S_CHANNEL_5_6;
++	else
++		channel = HDMI_AUDIO_I2S_CHANNEL_7_8;
++
++	switch (audio->rate) {
++	case 32000:
++		rate = HDMI_AUDIO_SAMPLE_FRE_32000;
++		n = N_32K;
++		break;
++	case 44100:
++		rate = HDMI_AUDIO_SAMPLE_FRE_44100;
++		n = N_441K;
++		break;
++	case 48000:
++		rate = HDMI_AUDIO_SAMPLE_FRE_48000;
++		n = N_48K;
++		break;
++	case 88200:
++		rate = HDMI_AUDIO_SAMPLE_FRE_88200;
++		n = N_882K;
++		break;
++	case 96000:
++		rate = HDMI_AUDIO_SAMPLE_FRE_96000;
++		n = N_96K;
++		break;
++	case 176400:
++		rate = HDMI_AUDIO_SAMPLE_FRE_176400;
++		n = N_1764K;
++		break;
++	case 192000:
++		rate = HDMI_AUDIO_SAMPLE_FRE_192000;
++		n = N_192K;
++		break;
++	default:
++		return -EINVAL;
++	}
++
++	switch (audio->width) {
++	case 16:
++		word_length = 0x02;
++		break;
++	case 20:
++		word_length = 0x0a;
++		break;
++	case 24:
++		word_length = 0x0b;
++		break;
++	default:
++		return -EINVAL;
++	}
++
++	cts = div_u64((u64)hdmi->tmdsclk * n, 128 * audio->rate);
++
++	/* Audio source is I2S. */
++	hdmi_writeb(hdmi, HDMI_AUDIO_CTRL1, 0x00);
++	hdmi_writeb(hdmi, HDMI_AUDIO_CTRL2, 0x40);
++	hdmi_writeb(hdmi, HDMI_I2S_AUDIO_CTRL,
++		    HDMI_AUDIO_I2S_FORMAT_STANDARD | channel);
++	hdmi_writeb(hdmi, HDMI_I2S_SWAP, 0x00);
++	hdmi_modb(hdmi, HDMI_AV_CTRL1, HDMI_AUDIO_SAMPLE_FRE_MASK, rate);
++	hdmi_writeb(hdmi, HDMI_AUDIO_SRC_NUM_AND_LENGTH, word_length);
++
++	hdmi_modb(hdmi, HDMI_LR_SWAP_N3,
++		  HDMI_AUDIO_N_19_16_MASK, (n >> 16) & 0x0f);
++	hdmi_writeb(hdmi, HDMI_N2, (n >> 8) & 0xff);
++	hdmi_writeb(hdmi, HDMI_N1, n & 0xff);
++
++	hdmi_writeb(hdmi, HDMI_CTS_EXT1, cts & 0xff);
++	hdmi_writeb(hdmi, HDMI_CTS_EXT2, (cts >> 8) & 0xff);
++	hdmi_writeb(hdmi, HDMI_CTS_EXT3, (cts >> 16) & 0xff);
++
++	if (audio->channels > 2)
++		hdmi_modb(hdmi, HDMI_LR_SWAP_N3, HDMI_AUDIO_LR_SWAP_MASK,
++			  HDMI_AUDIO_LR_SWAP_SUBPACKET1);
++	hdmi_writeb(hdmi, HDMI_AUDIO_STA_BIT_CTRL1, ~(rate >> 4) & 0x0f);
++	hdmi_writeb(hdmi, HDMI_AUDIO_STA_BIT_CTRL2, 0);
++
++	return 0;
++}
++
++static int rk3066_hdmi_audio_prepare(struct drm_bridge *bridge,
++				     struct drm_connector *connector,
++				     struct hdmi_codec_daifmt *fmt,
++				     struct hdmi_codec_params *hparms)
++{
++	struct rk3066_hdmi *hdmi = bridge_to_rk3066_hdmi(bridge);
++	int ret;
++
++	if (fmt->fmt != HDMI_I2S)
++		return -EINVAL;
++
++	hdmi->audio.channels = hparms->channels;
++	hdmi->audio.rate = hparms->sample_rate;
++	hdmi->audio.width = hparms->sample_width;
++
++	ret = rk3066_hdmi_audio_config(hdmi);
++	if (ret)
++		return ret;
++
++	hdmi->audio.active = true;
++	ret = drm_atomic_helper_connector_hdmi_update_audio_infoframe(connector,
++								      &hparms->cea);
++	if (ret)
++		return ret;
++
++	rk3066_hdmi_audio_reset(hdmi);
++
++	return 0;
++}
++
++static int rk3066_hdmi_audio_mute_stream(struct drm_bridge *bridge,
++					 struct drm_connector *connector,
++					 bool mute, int direction)
++{
++	struct rk3066_hdmi *hdmi = bridge_to_rk3066_hdmi(bridge);
++
++	hdmi->audio.muted = mute;
++	hdmi_modb(hdmi, HDMI_VIDEO_CTRL2, HDMI_AUDIO_DISABLE,
++		  mute ? HDMI_AUDIO_DISABLE : 0);
++	rk3066_hdmi_audio_reset(hdmi);
++
++	return 0;
++}
++
++static void rk3066_hdmi_audio_shutdown(struct drm_bridge *bridge,
++				       struct drm_connector *connector)
++{
++	struct rk3066_hdmi *hdmi = bridge_to_rk3066_hdmi(bridge);
++
++	hdmi->audio.active = false;
++	hdmi_modb(hdmi, HDMI_VIDEO_CTRL2, HDMI_AUDIO_DISABLE,
++		  HDMI_AUDIO_DISABLE);
++	drm_atomic_helper_connector_hdmi_clear_audio_infoframe(connector);
++}
++
+ static int rk3066_hdmi_config_video_timing(struct rk3066_hdmi *hdmi,
+ 					   struct drm_display_mode *mode)
+ {
+@@ -380,6 +553,15 @@
+ 	/* Unmute video output. */
+ 	hdmi_modb(hdmi, HDMI_VIDEO_CTRL2,
+ 		  HDMI_VIDEO_AUDIO_DISABLE_MASK, HDMI_AUDIO_DISABLE);
++
++	/* A stream was running across the mode set: N/CTS have changed. */
++	if (hdmi->audio.active) {
++		rk3066_hdmi_audio_config(hdmi);
++		if (!hdmi->audio.muted)
++			hdmi_modb(hdmi, HDMI_VIDEO_CTRL2, HDMI_AUDIO_DISABLE, 0);
++		rk3066_hdmi_audio_reset(hdmi);
++	}
++
+ 	return 0;
+ }
+ 
+@@ -494,6 +676,9 @@
+ 	.edid_read = rk3066_hdmi_bridge_edid_read,
+ 	.hdmi_clear_infoframe = rk3066_hdmi_bridge_clear_infoframe,
+ 	.hdmi_write_infoframe = rk3066_hdmi_bridge_write_infoframe,
++	.hdmi_audio_prepare = rk3066_hdmi_audio_prepare,
++	.hdmi_audio_mute_stream = rk3066_hdmi_audio_mute_stream,
++	.hdmi_audio_shutdown = rk3066_hdmi_audio_shutdown,
+ 	.mode_valid = rk3066_hdmi_bridge_mode_valid,
+ };
+ 
+@@ -691,11 +876,15 @@
+ 	hdmi->bridge.ops = DRM_BRIDGE_OP_DETECT |
+ 			   DRM_BRIDGE_OP_EDID |
+ 			   DRM_BRIDGE_OP_HDMI |
++			   DRM_BRIDGE_OP_HDMI_AUDIO |
+ 			   DRM_BRIDGE_OP_HPD;
+ 	hdmi->bridge.of_node = hdmi->dev->of_node;
+ 	hdmi->bridge.type = DRM_MODE_CONNECTOR_HDMIA;
+ 	hdmi->bridge.vendor = "Rockchip";
+ 	hdmi->bridge.product = "RK3066 HDMI";
++	hdmi->bridge.hdmi_audio_dev = dev;
++	hdmi->bridge.hdmi_audio_max_i2s_playback_channels = 2;
++	hdmi->bridge.hdmi_audio_dai_port = -1;
+ 
+ 	hdmi->bridge.ddc = rk3066_hdmi_i2c_adapter(hdmi);
+ 	if (IS_ERR(hdmi->bridge.ddc))

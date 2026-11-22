@@ -1,0 +1,86 @@
+// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
+/*
+ * SEGAM M8 V5.0 HDMI game stick: Rockchip RK3066, 256 MB DDR3, 16 MB SPI NOR.
+ *
+ * The kernel is started from the stock kernel (see kernel/kjump.c), so power supplies
+ * (SD, USB), the CPU clock and the DDR clock are left as the stock kernel set them.
+ * Includer: one of the rk3066a-segam-m8-*.dts files.
+ */
+#include "rk3066a.dtsi"
+
+/ {
+	compatible = "segam,m8", "rockchip,rk3066a";
+
+	aliases {
+		mmc0 = &mmc0;
+	};
+
+	memory@60000000 {
+		device_type = "memory";
+		reg = <0x60000000 0x10000000>;
+	};
+
+	chosen {
+		/* patched by kjump with the real size */
+		linux,initrd-start = <0x64100000>;
+		linux,initrd-end = <0x64100000>;
+	};
+
+	reserved-memory {
+		#address-cells = <1>;
+		#size-cells = <1>;
+		ranges;
+
+		/* kernel log, in the part of the stock framebuffer memory that is never shown */
+		ramoops@6fe00000 {
+			compatible = "ramoops";
+			reg = <0x6fe00000 0x100000>;
+			console-size = <0x40000>;
+			record-size = <0x20000>;
+		};
+	};
+
+	vcc_io: regulator-vcc-io {
+		compatible = "regulator-fixed";
+		regulator-name = "vcc_io";
+		regulator-min-microvolt = <3300000>;
+		regulator-max-microvolt = <3300000>;
+		regulator-always-on;
+	};
+};
+
+/* no regulator control known: do not change the CPU frequency */
+&cpu0 {
+	/delete-property/ operating-points;
+};
+
+&mmc0 {
+	bus-width = <4>;
+	cap-mmc-highspeed;
+	cap-sd-highspeed;
+	broken-cd;
+	disable-wp;
+	no-mmc;
+	no-sdio;
+	pinctrl-0 = <&sd0_clk &sd0_cmd &sd0_bus4>;
+	vmmc-supply = <&vcc_io>;
+	vqmmc-supply = <&vcc_io>;
+	status = "okay";
+};
+
+&uart2 {
+	status = "okay";
+};
+
+&usbphy {
+	status = "okay";
+};
+
+&usb_host {
+	status = "okay";
+};
+
+&usb_otg {
+	dr_mode = "host";
+	status = "okay";
+};

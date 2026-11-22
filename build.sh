@@ -14,13 +14,14 @@ CORES="libretro-nestopia libretro-genesisplusgx libretro-gambatte libretro-beetl
 # core libraries taken from the packages (not from what is installed on cuboxi)
 LIBS="libsndfile1 libvorbis0a libvorbisenc2 libvorbisfile3 libogg0 libflac14 libmp3lame0 libmpg123-0t64 libopus0"
 ssh $H "rm -rf $R && mkdir -p $R"
-scp -q ui/stickui.c ui/font.h ui/lang.h ui/libretro.h boot/stickinit.c $H:$R/
+scp -q ui/stickui.c ui/font.h ui/lang.h ui/libretro.h boot/stickinit.c kernel/kjump.c $H:$R/
 scp -q -r names $H:$R/
 ssh $H "set -e; cd $R
 CF='-O2 -march=armv7-a -mtune=cortex-a9 -mfpu=neon -mfloat-abi=hard -Wall'
 gcc \$CF -o stickui stickui.c -ldl -lz -Wl,--no-as-needed -lm
 strip stickui
 gcc -static -Os -s -Wall -o stickinit stickinit.c
+gcc -static -O2 -s -marm -march=armv7-a -mfpu=vfpv3-d16 -D_FILE_OFFSET_BITS=64 -Wall -o kjump kjump.c
 mkdir -p debs && cd debs && apt-get download $CORES $LIBS busybox-static >/dev/null && cd ..
 mkdir -p x && for d in debs/*.deb; do dpkg -x \$d x; done
 F=root; rm -rf \$F
@@ -29,7 +30,7 @@ ln -s usr/lib \$F/lib
 ln -s arm-linux-gnueabihf/ld-linux-armhf.so.3 \$F/usr/lib/ld-linux-armhf.so.3
 cp x/usr/bin/busybox \$F/bin/
 for a in \$(x/usr/bin/busybox --list); do [ \$a = busybox ] || ln -sf busybox \$F/bin/\$a; done
-cp stickui \$F/usr/bin/
+cp stickui kjump \$F/usr/bin/
 mkdir -p \$F/usr/share/stickos && cp -r names \$F/usr/share/stickos/
 cp x/usr/lib/arm-linux-gnueabihf/libretro/*.so \$F/usr/lib/libretro/
 [ -d ~/cores/out ] && { cp ~/cores/out/*.so \$F/usr/lib/libretro/ 2>/dev/null || true; }; echo cores: \$(ls \$F/usr/lib/libretro)
