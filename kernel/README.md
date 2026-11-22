@@ -13,6 +13,7 @@ Status: builds; the jump is tested only in QEMU. **Not yet started on the real s
 | `rk3066a-segam-m8.dts` | full version: KMS display, HDMI audio, GPU |
 | `patches/` | HDMI audio for `rk3066_hdmi` (not in mainline) |
 | `kjump.c` | starts the new kernel from the stock one |
+| `initrd.sh` | bring-up `/init`: SD tests, then `stickinit` |
 | `test/` | test of `kjump` in QEMU |
 | `build.sh` | builds everything into `out/kernel` |
 
@@ -40,16 +41,21 @@ On the SD, next to `system.sqfs`:
 stickos/kernel/zImage
 stickos/kernel/stick.dtb      one of the two .dtb files
 stickos/kernel/initrd
-stickos/kernel/try            empty file: try once at the next start
+stickos/kernel/try            try once at the next start (empty: stick.dtb; otherwise
+                              names of .dtb files, one per line: one for each start)
 stickos/kernel/always         empty file: use the new kernel at every start
 ```
 
-`try` is renamed to `tried` before jumping: if the new kernel does not work, switch the
-stick off and on and the stock kernel is back.
+A line of `try` is removed (and written to `tried`) before jumping: if the new kernel does
+not work, switch the stick off and on and, after the last line, the stock kernel is back.
+The list ends early if one of the device trees reaches StickOS.
 With an empty `stickos/kernel/watchdog` file the watchdog resets the stick after about
 28 s if the new kernel hangs; the log it left
 in RAM is then saved as `stickos/logs/ramoops.bin` (`tried` becomes `done`).
-Logs: `stickos/logs/kjump.log`, `dmesg-stock.log`, `dmesg-new.log`.
+Logs: `stickos/logs/kjump.log`, `dmesg-stock.log`, `dmesg-new.log`, `initrd.log`, `new.log`
+(with the name of the .dtb after the next start of the stock kernel).
+The initrd (`initrd.sh`) tries the SD step by step on the screen before starting StickOS; if a
+step takes more than 20 s it prints what is blocked.
 
 The whole screen turns into a colour to show how far the jump got: red = kernel mode,
 green = caches and MMU off, blue = images copied, kernel about to start.

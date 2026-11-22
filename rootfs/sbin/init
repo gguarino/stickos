@@ -20,20 +20,37 @@ mv -n /sd/stickos/*.log $D/ 2>/dev/null
 L=$D/init.log
 echo "StickOS: started $(date), kernel $(uname -r)" > $L
 # New kernel, if present on the SD: started from the stock kernel without touching the flash.
-# One attempt only: the file "try" is renamed before jumping, so after a failed start a
-# power cycle gives back the stock kernel. "always" = at every start (once it works).
+# The file "try" lists the device trees to try (empty = stick.dtb), one for each start: the
+# line is removed before jumping, so after the last one the stock kernel is used again.
+# "always" = stick.dtb at every start (once it works).
 K=/sd/stickos/kernel
 case $(uname -r) in 3.0.36*)
     if [ -f $K/tried ]; then            # log left in RAM by the last attempt
         kjump -d $D/ramoops.bin > $D/kjump-ram.log 2>&1
+        T=$(cat $K/tried)
+        [ -f $D/new.log ] && rm -f $K/try       # it reached the system: no need for the others
+        for f in kjump initrd new dmesg-new clk-new; do
+            [ -f $D/$f.log ] && mv $D/$f.log $D/$f-${T%.dtb}.log
+        done
         mv $K/tried $K/done
         sync
     fi
-    if [ -f $K/zImage ] && [ -f $K/stick.dtb ] && [ -f $K/initrd ] && { [ -f $K/try ] || [ -f $K/always ]; }; then
-        [ -f $K/try ] && mv $K/try $K/tried
+    T=
+    if [ -f $K/try ]; then
+        T=$(head -n 1 $K/try)
+        R=$(sed 1d $K/try)
+        rm $K/try
         sync
+        [ -n "$R" ] && echo "$R" > $K/try
+        T=${T:-stick.dtb}
+        echo "$T" > $K/tried
+        sync
+    elif [ -f $K/always ]; then
+        T=stick.dtb
+    fi
+    if [ -n "$T" ] && [ -f $K/zImage ] && [ -f $K/$T ] && [ -f $K/initrd ]; then
         dmesg > $D/dmesg-stock.log
-        kjump $([ -f $K/watchdog ] && echo -w) $K/zImage $K/stick.dtb $K/initrd > $D/kjump.log 2>&1
+        kjump $([ -f $K/watchdog ] && echo -w) $K/zImage $K/$T $K/initrd > $D/kjump.log 2>&1
         echo "kjump exited with code $?" >> $L      # only if it failed
         sync
     fi ;;

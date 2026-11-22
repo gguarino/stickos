@@ -1,0 +1,8 @@
+// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
+/* Bring-up variant: SD without DMA */
+#include "rk3066a-segam-m8-simplefb.dts"
+
+&mmc0 {
+	/delete-property/ dmas;
+	/delete-property/ dma-names;
+};

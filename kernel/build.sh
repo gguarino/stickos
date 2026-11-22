@@ -17,16 +17,20 @@ done
 d=$src/arch/arm/boot/dts/rockchip
 cp "$here"/rk3066a-segam-m8*.dts* "$d"/
 KCONFIG_ALLCONFIG="$here/stick.config" make -s -C "$src" O="$b" allnoconfig
-make -s -C "$src" O="$b" -j"$(nproc)" zImage modules rockchip/rk3066a-segam-m8.dtb rockchip/rk3066a-segam-m8-simplefb.dtb
+make -s -C "$src" O="$b" -j"$(nproc)" zImage modules rockchip/rk3066a-segam-m8.dtb rockchip/rk3066a-segam-m8-simplefb.dtb \
+    rockchip/rk3066a-segam-m8-simplefb-pio.dtb
 mkdir -p "$here/../out/kernel"
 cp "$b"/drivers/usb/dwc2/dwc2.ko "$here/../out/kernel/"
 cp "$b"/arch/arm/boot/zImage "$b"/arch/arm/boot/dts/rockchip/rk3066a-segam-m8*.dtb "$here/../out/kernel/"
-# initrd: /init is the same program as in the boot partition (finds and mounts the SD image)
+# initrd: kernel/initrd.sh (SD tests), then the same program as in the boot partition
+# (stickinit: finds and mounts the SD image)
 if [ -f "$here/../out/stickinit" ]; then
     t=$(mktemp -d)
-    mkdir "$t/dev" "$t/proc" "$t/sys"
-    cp "$here/../out/stickinit" "$t/init"
-    chmod 755 "$t/init"
+    mkdir "$t/dev" "$t/proc" "$t/sys" "$t/bin"
+    cp "$here/initrd.sh" "$t/init"
+    cp "$here/../out/stickinit" "$t/stickinit"
+    cp "$here/../out/root/bin/busybox" "$t/bin/"
+    chmod 755 "$t/init" "$t/stickinit" "$t/bin/busybox"
     (cd "$t" && find . | LC_ALL=C sort | cpio -o -H newc --quiet -R 0:0 | gzip -9n) > "$here/../out/kernel/initrd"
     rm -r "$t"
 else

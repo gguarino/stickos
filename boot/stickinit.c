@@ -39,6 +39,8 @@ static void say(const char *fmt, ...)
     if (n > (int)sizeof(buf) - 2)
         n = sizeof(buf) - 2;
     buf[n++] = '\n';
+    if (access("/init.stock", F_OK) && write(2, buf, n) < 0) {   /* initrd of the new kernel */
+    }
     if (logfd >= 0) {
         if (write(logfd, buf, n) < 0) {
         }
@@ -68,10 +70,12 @@ static void stock(char **argv)
     say("starting the stock system");
     if (logfd >= 0)
         close(logfd);
+    logfd = -1;
     umount("/sb/sd");
     umount("/sb/proc");
     umount("/sb/sys");
     execv("/init.stock", argv);
+    say("no /init.stock: nothing else to start");
     for (;;)
         pause();
 }
