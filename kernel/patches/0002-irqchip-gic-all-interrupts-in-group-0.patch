@@ -1,0 +1,26 @@
+irqchip/gic: put all the interrupts in group 0
+
+The stock kernel (FIQ debugger) leaves them in group 1. Register 0 is banked: every CPU
+must clear its own. Only for secure mode (no effect in non-secure mode).
+
+--- a/drivers/irqchip/irq-gic.c
++++ b/drivers/irqchip/irq-gic.c
+@@ -470,6 +470,10 @@
+ 
+ 	writel_relaxed(GICD_DISABLE, base + GIC_DIST_CTRL);
+ 
++	/* Started in secure mode from another kernel: everything in group 0. */
++	for (i = 32; i < gic_irqs; i += 32)
++		writel_relaxed(0, base + GIC_DIST_IGROUP + i / 8);
++
+ 	/*
+ 	 * Set all global interrupts to this CPU only.
+ 	 */
+@@ -516,6 +520,7 @@
+ 				gic_cpu_map[i] &= ~cpu_mask;
+ 	}
+ 
++	writel_relaxed(0, dist_base + GIC_DIST_IGROUP);
+ 	gic_cpu_config(dist_base, 32, GICD_INT_DEF_PRI);
+ 
+ 	writel_relaxed(GICC_INT_PRI_THRESHOLD, base + GIC_CPU_PRIMASK);

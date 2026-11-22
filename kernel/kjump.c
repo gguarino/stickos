@@ -65,7 +65,7 @@ struct params {
     uint32_t copies;                    /* 12: list of src, dst, words; words 0 ends */
     uint32_t entry;                     /* 16 */
     uint32_t dtb;                       /* 20 */
-    uint32_t list[64];
+    uint32_t list[160];
 };
 
 /* test: returns the processor mode (0x13 = supervisor) + 0x5a00 */
@@ -366,6 +366,12 @@ int main(int argc, char **argv)
     if (test)
         return 0;
 
+#ifndef KJ_QEMU
+    volatile uint32_t *gic = mmap(NULL, 0x2000, PROT_READ, MAP_SHARED, memfd, 0x1013c000);
+    if (gic != MAP_FAILED)
+        say("GIC: GICD_CTLR 0x%x IGROUPR 0x%x 0x%x 0x%x 0x%x GICC_CTLR 0x%x PMR 0x%x", gic[0x1000 / 4],
+            gic[0x1080 / 4], gic[0x1084 / 4], gic[0x1088 / 4], gic[0x108c / 4], gic[0x100 / 4], gic[0x104 / 4]);
+#endif
     /* 2: images */
     size_t zl, dl, il;
     unsigned char *z = load(argv[1], &zl), *d = load(argv[2], &dl), *in = load(argv[3], &il);
@@ -414,6 +420,15 @@ int main(int argc, char **argv)
     for (int i = 0; i < 2; i++) {
         p.list[n++] = usb[i] + 0x008; p.list[n++] = 0;
         p.list[n++] = usb[i] + 0x010; p.list[n++] = 1;
+    }
+    /* GIC: the stock kernel (FIQ debugger) puts the interrupts in group 1, the new kernel
+     * only enables group 0 and would get no interrupts at all */
+    p.list[n++] = 0x1013c100; p.list[n++] = 0;          /* cpu interface off */
+    p.list[n++] = 0x1013d000; p.list[n++] = 0;          /* distributor off */
+    for (int i = 0; i < 8; i++) {
+        p.list[n++] = 0x1013d180 + i * 4; p.list[n++] = 0xffffffff;     /* disable */
+        p.list[n++] = 0x1013d280 + i * 4; p.list[n++] = 0xffffffff;     /* not pending */
+        p.list[n++] = 0x1013d080 + i * 4; p.list[n++] = 0;              /* group 0 */
     }
     /* watchdog: resets the stick after about 28 s, unless the new kernel takes it over */
     if (wd) {
