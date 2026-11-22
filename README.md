@@ -61,7 +61,7 @@ stick boots exactly as before, and a single command restores the original boot p
 | | |
 |---|---|
 | Device | SEGAM M8 V5.0 HDMI stick (board labelled *M8*) |
-| SoC | Rockchip **RK3026/RK3028A** (rk2928 family), 2× Cortex-A9 up to 912 MHz, Mali-400 |
+| SoC | Rockchip **RK3066** (register level, see below), 2× Cortex-A9 up to 912 MHz, Mali-400 |
 | RAM | 256 MB (244 MB visible to Linux) |
 | Boot flash | 16 MB SPI NOR (PUYA PY25Q128HA) |
 | Video | HDMI 1280×720, framebuffer RGB565 |
@@ -71,7 +71,12 @@ stick boots exactly as before, and a single command restores the original boot p
 | Stock software | Linux 3.0.36 + Android-style init + a proprietary game menu |
 
 Despite what the vendor firmware says, the SoC is not an RK3032/RK3036 (those are Cortex-A7):
-the running kernel reports two Cortex-A9 cores (MIDR `0x413fc090`) and machine id 2928.
+the running kernel reports two Cortex-A9 cores (MIDR `0x413fc090`). The chip marking is
+under the heatsink, but everything visible from software is an **RK3066**: USB id
+`2207:300a`, six GPIO banks, 512 KB of L2 cache, the `mach-rk30` / `rk30-hdmi` stock
+drivers, and a peripheral map (LCDC, HDMI, I2S, USB, SD, SPI) that matches the mainline
+`rk3066a.dtsi`. The boot loader still passes the RK2928 machine id (2928).
+Earlier versions of this page wrongly said RK3026/RK3028A.
 
 ## How it works
 
@@ -468,7 +473,11 @@ test/                 headless test programs
 : Every 10 s the log contains a line like
   `performance: game 50.0 fps (expected 50.0), screen 25.0 fps, audio underruns 0`.
   `game` should stay close to `expected`. `screen` is the number of different frames
-  the game drew, so 25 or 30 is normal for many 3D games.
+  the game drew, so 25 or 30 is normal for many 3D games. The next line
+  (`per frame: core … ms, drawing … ms; cpu: …`) shows where the time goes: emulation,
+  drawing, or waiting for the SD (`wait-io`).
+  PlayStation games use PCSX-ReARMed's automatic frameskip by default: a frame's drawing is
+  skipped when the audio is about to run dry. Change it in Settings → PCSX-ReARMed.
 
 **Something is stuck**
 : A watchdog writes `watchdog: game loop stopped …` to the log, with the state of every
@@ -477,7 +486,7 @@ test/                 headless test programs
 ## Technical notes
 
 Things learned while porting to this hardware. They may be useful to anyone working with
-the RK3026 or old Rockchip kernels.
+the RK3066 or old Rockchip kernels.
 
 - **Boot.** The stick boots from the internal SPI NOR only; the bootrom does not boot the
   microSD. The stock loader's rockusb mode (`Loader`) supports reading and writing LBA

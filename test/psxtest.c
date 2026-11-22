@@ -1,7 +1,8 @@
 /* headless test of a CD game: psxtest CORE ROM FRAMES OUTDIR
  * runs FRAMES frames with the StickOS callbacks (options from SD/stickos/options),
  * every 50 frames prints how many real frames the core produced and how long it took,
- * and every 250 frames writes the last real frame as OUTDIR/fNNNNN.ppm */
+ * and every 250 frames writes the last real frame as OUTDIR/fNNNNN.ppm.
+ * A 5th argument simulates an audio buffer always about to run dry (frameskip test). */
 #define main stickui_main
 #include "../ui/stickui.c"
 #undef main
@@ -57,6 +58,10 @@ int main(int argc, char **argv)
     static double t; t = now();     /* static: the core does not preserve the NEON registers d8-d15 */
     static unsigned r0;
     for (int i = 1; i <= frames; i++) {
+        if (argc > 5 && audio_status_cb)    /* simulate an audio buffer about to run dry */
+            vfp_call((void *)audio_status_cb, 1, 5, 1);
+        else
+            audio_status();
         core_run_safe();
         audio_flush();                      /* no audio device: drops the samples */
         if (i % 50 == 0) {

@@ -1686,6 +1686,23 @@ static void audio_push(const int16_t *data, int frames)
 }
 
 static unsigned underruns;
+static retro_audio_buffer_status_callback_t audio_status_cb;
+static uintptr_t vfp_call(void *fn, uintptr_t a, uintptr_t b, uintptr_t c);
+
+/* tells the core how full the audio buffer is, before each frame: when it is
+ * about to run dry the core can skip drawing a frame (frameskip "auto") */
+static void audio_status(void)
+{
+    if (!audio_status_cb)
+        return;
+    snd_pcm_sframes_t delay = 0;
+    if (pcm < 0 || ioctl(pcm, SNDRV_PCM_IOCTL_DELAY, &delay))
+        delay = A_TARGET;
+    if (delay < 0)
+        delay = 0;
+    unsigned occ = (unsigned)(delay * 100 / (A_PERIOD * A_PERIODS));
+    vfp_call((void *)audio_status_cb, 1, occ > 100 ? 100 : occ, delay < A_TARGET / 2);
+}
 
 /* resamples the frame's samples and writes them, never blocking */
 static void audio_flush(void)
@@ -1830,6 +1847,13 @@ static int opt_valid(const struct opt *o, const char *v)
     return 0;
 }
 
+/* StickOS defaults that replace the core's own (still changeable from Settings) */
+static const char *const opt_stick_def[][2] = {
+    /* skip drawing a frame when the audio is about to run dry, instead of slowing
+     * down (Crash Bandicoot's intro had audio gaps on the stick without it) */
+    { "pcsx_rearmed_frameskip_type", "auto" },
+};
+
 static void opt_add(const char *key, const char *desc, const char *vals)
 {
     struct opt *o = NULL;
@@ -1848,6 +1872,9 @@ static void opt_add(const char *key, const char *desc, const char *vals)
     o->desc = strdup(desc);
     o->vals = strdup(vals);
     snprintf(o->def, sizeof(o->def), "%.*s", (int)strcspn(vals, "|"), vals);
+    for (size_t i = 0; i < sizeof(opt_stick_def) / sizeof(opt_stick_def[0]); i++)
+        if (!strcmp(opt_stick_def[i][0], key) && opt_valid(o, opt_stick_def[i][1]))
+            snprintf(o->def, sizeof(o->def), "%s", opt_stick_def[i][1]);
     snprintf(o->val, sizeof(o->val), "%s", o->def);
     for (int i = 0; i < nosaved; i++)
         if (!strcmp(osaved[i].key, key) && opt_valid(o, osaved[i].val))
@@ -1909,7 +1936,7 @@ static inline void fpscr_set(unsigned v) { (void)v; }
  * values the compiler keeps there (e.g. the 50 Hz frame pacing) get corrupted and
  * the game stops. */
 #if defined(__arm__)
-__attribute__((naked, noinline)) static uintptr_t vfp_call(void *fn, uintptr_t a, uintptr_t b)
+__attribute__((naked, noinline)) static uintptr_t vfp_call(void *fn, uintptr_t a, uintptr_t b, uintptr_t c)
 {
     __asm__ volatile(
         "push {r4, lr}\n"
@@ -1917,19 +1944,20 @@ __attribute__((naked, noinline)) static uintptr_t vfp_call(void *fn, uintptr_t a
         "mov r4, r0\n"
         "mov r0, r1\n"
         "mov r1, r2\n"
+        "mov r2, r3\n"
         "blx r4\n"
         "vpop {d8-d15}\n"
         "pop {r4, pc}\n");
 }
 #else
-static uintptr_t vfp_call(void *fn, uintptr_t a, uintptr_t b)
+static uintptr_t vfp_call(void *fn, uintptr_t a, uintptr_t b, uintptr_t c)
 {
-    return ((uintptr_t (*)(uintptr_t, uintptr_t))fn)(a, b);
+    return ((uintptr_t (*)(uintptr_t, uintptr_t, uintptr_t))fn)(a, b, c);
 }
 #endif
-#define CORE0(f)       ((void)vfp_call((void *)core.f, 0, 0))
-#define CORE1(f, a)    vfp_call((void *)core.f, (uintptr_t)(a), 0)
-#define CORE2(f, a, b) vfp_call((void *)core.f, (uintptr_t)(a), (uintptr_t)(b))
+#define CORE0(f)       ((void)vfp_call((void *)core.f, 0, 0, 0))
+#define CORE1(f, a)    vfp_call((void *)core.f, (uintptr_t)(a), 0, 0)
+#define CORE2(f, a, b) vfp_call((void *)core.f, (uintptr_t)(a), (uintptr_t)(b), 0)
 
 /* watchdog (see wd_main) */
 
@@ -2159,6 +2187,14 @@ static bool env_cb(unsigned cmd, void *data)
     case RETRO_ENVIRONMENT_SET_MESSAGE:
         logm("core message: %s", ((const struct retro_message *)data)->msg);
         return true;
+    case RETRO_ENVIRONMENT_SET_AUDIO_BUFFER_STATUS_CALLBACK: {
+        /* used by the cores' automatic frameskip */
+        const struct retro_audio_buffer_status_callback *c = data;
+        audio_status_cb = c ? c->callback : NULL;
+        return true;
+    }
+    case RETRO_ENVIRONMENT_SET_MINIMUM_AUDIO_LATENCY:
+        return true;                        /* the buffer is fixed (85 ms) */
     default:
         return false;
     }
@@ -2173,11 +2209,16 @@ static inline uint16_t px1555(uint16_t c)
     return ((c & 0x7fe0) << 1) | ((c & 0x0200) >> 4) | (c & 0x1f);
 }
 
+/* time measurements for the performance log (seconds, summed over 10 s) */
+static double pf_run, pf_run_max, pf_draw, pf_wait;
+
 static void video_cb(const void *data, unsigned w, unsigned h, size_t pitch)
 {
+    double t0 = now();
     vsync_done = 1;
     if (!data || !w || !h) {                /* repeated frame */
         wait_vsync();
+        pf_wait += now() - t0;
         return;
     }
     int s = YRES / (int)h;
@@ -2239,8 +2280,27 @@ static void video_cb(const void *data, unsigned w, unsigned h, size_t pitch)
         for (int k = 0; k < s; k++, d += STRIDE)
             memcpy(d, out, ow * 2);
     }
+    double t1 = now();
     present();
+    pf_draw += t1 - t0;
+    pf_wait += now() - t1;
     frames_shown++;
+}
+
+/* cpu time of the whole system from /proc/stat: user+nice, system+irq, iowait, idle */
+static void cpu_times(unsigned long long v[4])
+{
+    unsigned long long u = 0, n = 0, sy = 0, id = 0, io = 0, irq = 0, sirq = 0;
+    FILE *f = fopen("/proc/stat", "r");
+    if (f) {
+        if (fscanf(f, "cpu %llu %llu %llu %llu %llu %llu %llu", &u, &n, &sy, &id, &io, &irq, &sirq) != 7)
+            u = n = sy = id = io = irq = sirq = 0;
+        fclose(f);
+    }
+    v[0] = u + n;
+    v[1] = sy + irq + sirq;
+    v[2] = io;
+    v[3] = id;
 }
 
 static void audio_sample_cb(int16_t l, int16_t r)
@@ -2851,7 +2911,8 @@ no_extract:
     clear_pages();
     gclear = 2;
     for (int i = 0; i < nopts; i++)
-        if (strcmp(opts[i].val, opts[i].def) || strstr(opts[i].key, "thread") || strstr(opts[i].key, "readahead"))
+        if (strcmp(opts[i].val, opts[i].def) || strstr(opts[i].key, "thread") || strstr(opts[i].key, "readahead") ||
+            strstr(opts[i].key, "frameskip_type"))
             logm("option %s = %s", opts[i].key, opts[i].val);
     pthread_t wd;
     if (pthread_create(&wd, NULL, wd_main, NULL) == 0)
@@ -2879,7 +2940,13 @@ no_extract:
         }
         vsync_done = 0;
         if (run) {
+            audio_status();
+            double tr = now(), w0 = pf_wait;
             core_run_safe();
+            double d = now() - tr - (pf_wait - w0);     /* without the vsync waits */
+            pf_run += d;
+            if (d > pf_run_max)
+                pf_run_max = d;
             runs++;
             audio_flush();
         }
@@ -2930,6 +2997,20 @@ no_extract:
             double dt = now() - t_log;
             logm("performance: game %.1f fps (expected %.1f), screen %.1f fps, audio underruns %u",
                  (runs - runs0) / dt, core_fps, (frames_shown - frames0) / dt, underruns - under0);
+            static unsigned long long c0[4];
+            unsigned long long c1[4], tot = 0;
+            cpu_times(c1);
+            for (int i = 0; i < 4; i++)
+                tot += c1[i] - c0[i];
+            unsigned long nr = runs - runs0 ? runs - runs0 : 1;
+            if (c0[3] && tot)
+                logm("  per frame: core %.1f ms (max %.0f), drawing %.1f ms; cpu: user %llu%% sys %llu%% "
+                     "wait-io %llu%% idle %llu%%", pf_run * 1000 / nr, pf_run_max * 1000,
+                     pf_draw * 1000 / (frames_shown - frames0 ? frames_shown - frames0 : 1),
+                     (c1[0] - c0[0]) * 100 / tot, (c1[1] - c0[1]) * 100 / tot, (c1[2] - c0[2]) * 100 / tot,
+                     (c1[3] - c0[3]) * 100 / tot);
+            memcpy(c0, c1, sizeof(c0));
+            pf_run = pf_run_max = pf_draw = pf_wait = 0;
             frames0 = frames_shown;
             runs0 = runs;
             under0 = underruns;
