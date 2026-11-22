@@ -38,7 +38,8 @@ case $(uname -r) in 3.0.36*)
         sync
     fi ;;
 *)
-    dmesg > $D/dmesg-new.log; sync ;;               # early copy, in case something hangs later
+    dmesg > $D/dmesg-new.log; sync                  # early copy, in case something hangs later
+    [ -f $K/new.sh ] && sh $K/new.sh ;;             # bring-up steps
 esac
 (sleep 15; dmesg > $D/dmesg.log; sync) &
 while :; do
