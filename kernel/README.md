@@ -46,9 +46,11 @@ stickos/kernel/always         empty file: use the new kernel at every start
 
 `try` is renamed to `tried` before jumping: if the new kernel does not work, switch the
 stick off and on and the stock kernel is back.
+The watchdog resets the stick after about 28 s if the new kernel hangs; the log it left
+in RAM is then saved as `stickos/logs/ramoops.bin` (`tried` becomes `done`).
 Logs: `stickos/logs/kjump.log`, `dmesg-stock.log`, `dmesg-new.log`.
 
-Coloured strips at the top of the screen show how far the jump got: red = kernel mode,
+The whole screen turns into a colour to show how far the jump got: red = kernel mode,
 green = caches and MMU off, blue = images copied, kernel about to start.
 
 ## Known limits

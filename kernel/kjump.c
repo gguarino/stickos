@@ -3,7 +3,9 @@
  * without writing to the flash. If anything goes wrong, power cycle: the stick starts
  * as before.
  *
- *   kjump [-t] ZIMAGE DTB INITRD      -t: only test that code can run in kernel mode
+ *   kjump ZIMAGE DTB INITRD
+ *   kjump -t          only test that code can run in kernel mode
+ *   kjump -d FILE     save the log left in RAM by the new kernel, if any
  *
  * How it works:
  *  - the stock framebuffer reserves 12 MB of physically contiguous memory; only the first
@@ -13,7 +15,7 @@
  *  - one unused entry of the kernel's system call table is replaced through /dev/mem and
  *    the system call is invoked: the code runs in kernel mode, turns off interrupts, caches
  *    and MMU, quiesces USB DMA, copies the images to their final place and jumps.
- *  - the code paints strips in the top of the screen: a blocked start shows how far it got.
+ *  - the code fills the screen with a colour: a blocked start shows how far it got.
  *    red = kernel mode reached, green = MMU and caches off, blue = images copied.
  */
 #define _GNU_SOURCE
@@ -41,11 +43,12 @@
 #define AREALEN 0xc00000ul
 #define SHOWN   0x400000ul              /* visible part, not used for the images */
 #define PL310   0x10138000ul
-#define FBSHOW  AREA                    /* strips at the top of the screen */
+#define FBSHOW  AREA                    /* screen to fill with colours */
 #else                                   /* QEMU vexpress-a9, see kernel/test */
 #include "kjump_qemu.h"
 #endif
 #define NRSYS   223                     /* unused on every ARM kernel */
+#define OOPSOFF (AREALEN - 0x200000ul)  /* ramoops of the new kernel, 1 MB */
 #define STUBOFF (AREALEN - 0x220000ul)  /* code and parameters, before ramoops (0x6fe00000) */
 
 /* where the images go */
@@ -155,15 +158,20 @@ __asm__(
 "   mov r0, #0\n"
 "   mvn r1, #0\n"
 "   bx r4\n"
-/* paints 16 lines of 1280 pixels at r10 with the colour r1, moves r10 to the next strip */
+/* fills the screen (1280x720, 16 bit, at r10) with the colour r1, then waits about a second */
 "90: cmp r10, #0\n"
 "   bxeq lr\n"
 "   orr r1, r1, r1, lsl #16\n"
-"   mov r2, #10240\n"
-"91: str r1, [r10], #4\n"
+"   mov r3, r10\n"
+"   movw r2, #0x0800\n"                /* 460800 words */
+"   movt r2, #7\n"
+"91: str r1, [r3], #4\n"
 "   subs r2, r2, #1\n"
 "   bne 91b\n"
 "   dsb\n"
+"   mov r2, #0x400000\n"
+"92: subs r2, r2, #1\n"
+"   bne 92b\n"
 "   bx lr\n"
 "   .ltorg\n"
 "kj_go_end:\n");
@@ -251,6 +259,31 @@ static void put(const char *path, const char *v)
     close(fd);
 }
 
+/* ramoops zones start with "DBGC" (one every 128 KB): saves the area if there is one */
+static int dump(const char *path)
+{
+    int fb = open(MEMDEV, O_RDWR | O_SYNC);
+    if (fb < 0)
+        die(MEMDEV);
+    unsigned char *m = mmap(NULL, AREALEN, PROT_READ, MAP_SHARED, fb, AREAOFF);
+    if (m == MAP_FAILED)
+        die("mmap");
+    int found = 0;
+    uint32_t first = *(uint32_t *)(m + OOPSOFF);
+    for (unsigned long o = 0; o < 0x100000; o += 0x10000)
+        if (!memcmp(m + OOPSOFF + o, "DBGC", 4))
+            found++;
+    say("ramoops zones found: %d (first word 0x%08x)", found, first);
+    if (!found)
+        return 1;
+    FILE *f = fopen(path, "wb");
+    if (!f)
+        die(path);
+    fwrite(m + OOPSOFF, 1, 0x100000, f);
+    fclose(f);
+    return 0;
+}
+
 static int memfd;
 
 static uint32_t table_get(unsigned nr)
@@ -274,6 +307,8 @@ static void table_set(unsigned nr, uint32_t v)
 int main(int argc, char **argv)
 {
     int test = argc > 1 && !strcmp(argv[1], "-t");
+    if (argc == 3 && !strcmp(argv[1], "-d"))
+        return dump(argv[2]);
     if (!test && argc != 4) {
         fprintf(stderr, "usage: kjump [-t] ZIMAGE DTB INITRD\n");
         return 2;
@@ -339,6 +374,7 @@ int main(int argc, char **argv)
         return 1;
     }
     unsigned char *zs = area + SHOWN, *ds = zs + zw, *is = ds + dw;
+    memset(area + OOPSOFF, 0, 0x100000);        /* no leftovers from earlier attempts */
     memcpy(zs, z, zw);
     memcpy(ds, d, dw);
     memcpy(is, in, iw);
@@ -369,6 +405,10 @@ int main(int argc, char **argv)
         p.list[n++] = usb[i] + 0x008; p.list[n++] = 0;
         p.list[n++] = usb[i] + 0x010; p.list[n++] = 1;
     }
+    /* watchdog: resets the stick after about 28 s, unless the new kernel takes it over */
+    p.list[n++] = 0x2004c004; p.list[n++] = 0xff;
+    p.list[n++] = 0x2004c00c; p.list[n++] = 0x76;
+    p.list[n++] = 0x2004c000; p.list[n++] = 0x1d;
 #endif
     p.list[n++] = 0;
     p.copies = base + n * 4;

@@ -24,6 +24,11 @@ echo "StickOS: started $(date), kernel $(uname -r)" > $L
 # power cycle gives back the stock kernel. "always" = at every start (once it works).
 K=/sd/stickos/kernel
 case $(uname -r) in 3.0.36*)
+    if [ -f $K/tried ]; then            # log left in RAM by the last attempt
+        kjump -d $D/ramoops.bin > $D/kjump-ram.log 2>&1
+        mv $K/tried $K/done
+        sync
+    fi
     if [ -f $K/zImage ] && [ -f $K/stick.dtb ] && [ -f $K/initrd ] && { [ -f $K/try ] || [ -f $K/always ]; }; then
         [ -f $K/try ] && mv $K/try $K/tried
         sync

@@ -11,7 +11,7 @@
 		#address-cells = <1>;
 		#size-cells = <1>;
 		ranges;
-		bootargs = "console=ttyS2,115200 console=tty0 loglevel=8 clk_ignore_unused pd_ignore_unused regulator_ignore_unused maxcpus=1 rdinit=/init";
+		bootargs = "console=ttyS2,115200 console=tty0 loglevel=8 clk_ignore_unused pd_ignore_unused regulator_ignore_unused maxcpus=1 panic=5 rdinit=/init";
 
 		framebuffer@6f400000 {
 			compatible = "simple-framebuffer";
@@ -30,6 +30,17 @@
 			no-map;
 		};
 	};
+};
+
+/* mainline would change the PLLs here: the picture (and more) depends on them */
+&cru {
+	/delete-property/ assigned-clocks;
+	/delete-property/ assigned-clock-rates;
+};
+
+&mmc0 {
+	bus-width = <1>;
+	pinctrl-0 = <&sd0_clk &sd0_cmd &sd0_bus1>;
 };
 
 /* the stock LCDC keeps scanning the framebuffer */

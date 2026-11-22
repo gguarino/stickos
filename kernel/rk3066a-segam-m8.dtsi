@@ -68,6 +68,11 @@
 	status = "okay";
 };
 
+/* started by kjump: resets the stick if the new kernel hangs */
+&wdt {
+	status = "okay";
+};
+
 &uart2 {
 	status = "okay";
 };
