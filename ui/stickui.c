@@ -19,6 +19,7 @@
 #include <fcntl.h>
 #include <linux/fb.h>
 #include <linux/input.h>
+#include <linux/kd.h>
 #include <poll.h>
 #include <signal.h>
 #include <sound/asound.h>
@@ -228,6 +229,13 @@ static int video_init(void)
     if (fb < 0) {
         logm("fb0: %s", strerror(errno));
         return -1;
+    }
+    /* text console in graphics mode: the kernel does not write over the picture any more */
+    int tty = open("/dev/tty0", O_RDWR | O_CLOEXEC);
+    if (tty >= 0) {
+        if (ioctl(tty, KDSETMODE, KD_GRAPHICS))
+            logm("KDSETMODE: %s", strerror(errno));
+        close(tty);
     }
     ioctl(fb, FBIOGET_VSCREENINFO, &var);
     if (var.yres_virtual < 2 * var.yres || var.bits_per_pixel != 16) {

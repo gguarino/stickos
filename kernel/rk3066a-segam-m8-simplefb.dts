@@ -11,7 +11,7 @@
 		#address-cells = <1>;
 		#size-cells = <1>;
 		ranges;
-		bootargs = "console=tty0 loglevel=8 clk_ignore_unused pd_ignore_unused regulator_ignore_unused maxcpus=1 oops=panic panic=120 rdinit=/init";
+		bootargs = "console=tty0 loglevel=4 clk_ignore_unused pd_ignore_unused regulator_ignore_unused maxcpus=1 oops=panic panic=120 rdinit=/init";
 
 		framebuffer@6f400000 {
 			compatible = "simple-framebuffer";

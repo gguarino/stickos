@@ -1,0 +1,20 @@
+From: StickOS <dev@pinux.xyz>
+Subject: [PATCH] usb: dwc2: no connector ID interrupt on host-only ports
+
+On the RK3066 left running by the stock kernel, the host-only port (dr_mode = "host")
+gets a connector ID status change interrupt at every core init; the handler inits the
+core again, so it never stops. The ID pin matters only to ports that can change role.
+
+---
+--- a/drivers/usb/dwc2/hcd.c
++++ b/drivers/usb/dwc2/hcd.c
+@@ -54,7 +54,8 @@
+ 
+ 	if (!hsotg->params.host_dma)
+ 		intmsk |= GINTSTS_RXFLVL;
+-	if (!hsotg->params.external_id_pin_ctl)
++	/* the ID pin matters only to ports that can change role */
++	if (!hsotg->params.external_id_pin_ctl && hsotg->dr_mode == USB_DR_MODE_OTG)
+ 		intmsk |= GINTSTS_CONIDSTSCHNG;
+ 
+ 	intmsk |= GINTSTS_WKUPINT | GINTSTS_USBSUSP |
