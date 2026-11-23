@@ -79,6 +79,7 @@ static const struct tr {
     { { "In game: SELECT + START = pause menu", "Durante il gioco: SELECT + START = menu di pausa",
         "En jeu : SELECT + START = menu pause", "Im Spiel: SELECT + START = Pausenmenü",
         "En el juego: SELECT + START = menú de pausa" } },
+    { { "Kernel:", "Kernel:", "Noyau :", "Kernel:", "Kernel:" } },
     { { "Connected joypads:", "Joypad collegati:", "Manettes connectées :", "Verbundene Joypads:",
         "Mandos conectados:" } },
     { { "(default buttons)", "(tasti predefiniti)", "(boutons par défaut)", "(Standardtasten)",

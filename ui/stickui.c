@@ -1548,7 +1548,7 @@ static void info_screen(void)
     text(40, 200, 2, C_DIM, T("In game: SELECT + START = pause menu"));
     struct utsname u;
     if (uname(&u) == 0) {
-        snprintf(l, sizeof(l), "Linux %s %s", u.release, u.version);
+        snprintf(l, sizeof(l), "%s Linux %s %s", T("Kernel:"), u.release, u.version);
         l[74] = 0;                          /* fits on one line */
         text(40, 240, 2, C_DIM, l);
     }
