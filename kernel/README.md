@@ -35,7 +35,8 @@ off interrupts, caches and MMU, stops the USB DMA and jumps to the new kernel. I
 to run on any other kernel than the stock one (it checks the version and the system call
 table).
 
-On the SD, next to `system.sqfs`:
+On the SD, next to `system.sqfs` (ready files in `images/kernel/`; `stick.dtb` there is the
+simplefb version):
 
 ```
 stickos/kernel/zImage
