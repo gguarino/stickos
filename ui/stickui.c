@@ -504,6 +504,7 @@ struct pad {
     int configured;                     /* map read from joypad.cfg */
     int asked;                          /* configuration already offered */
     unsigned long keys[KEY_CNT / (8 * sizeof(long)) + 1];
+    unsigned long keybits[KEY_CNT / (8 * sizeof(long)) + 1], absbits[ABS_CNT / (8 * sizeof(long)) + 1];
     int absval[ABS_CNT], absmin[ABS_CNT], absmax[ABS_CNT], absrest[ABS_CNT];
 };
 
@@ -511,7 +512,9 @@ struct pad {
 static struct pad pads[MAXPAD];
 static int npads;
 
-/* saved maps: device id -> buttons */
+/* saved maps: device id -> buttons. A model can have more than one section: the same
+ * joypad can report different buttons with another kernel (keyboard keys with the stock
+ * one, gamepad buttons with Linux 6.x); the section used is the first that fits. */
 struct savedmap {
     char id[128];
     struct bind map[NIN][NALT];
@@ -692,11 +695,27 @@ static void default_map(struct pad *p, const unsigned long *kb, const unsigned l
     }
 }
 
+/* 1 if every button/axis of the map exists on the device */
+static int map_fits(const struct pad *p, struct bind map[NIN][NALT])
+{
+    int n = 0;
+    for (int b = 0; b < NIN; b++)
+        for (int a = 0; a < NALT; a++) {
+            const struct bind *bd = &map[b][a];
+            if (bd->type == EV_KEY && (bd->code >= KEY_CNT || !TBIT(p->keybits, bd->code)))
+                return 0;
+            if (bd->type == EV_ABS && (bd->code >= ABS_CNT || !TBIT(p->absbits, bd->code)))
+                return 0;
+            n += bd->type != 0;
+        }
+    return n > 0;
+}
+
 static void pad_apply_saved(struct pad *p)
 {
     p->configured = 0;
     for (int i = 0; i < nsaved; i++)
-        if (!strcmp(saved[i].id, p->id)) {
+        if (!strcmp(saved[i].id, p->id) && map_fits(p, saved[i].map)) {
             memcpy(p->map, saved[i].map, sizeof(p->map));
             p->configured = 1;
         }
@@ -726,6 +745,8 @@ static void input_scan(void)
         ioctl(fd, EVIOCGBIT(EV_ABS, sizeof(ab)), ab);
         struct pad *p = &pads[npads];
         memset(p, 0, sizeof(*p));
+        memcpy(p->keybits, kb, sizeof(p->keybits));
+        memcpy(p->absbits, ab, sizeof(p->absbits));
         p->fd = fd;
         p->idx = i;
         ioctl(fd, EVIOCGNAME(sizeof(p->name) - 1), p->name);
@@ -1056,7 +1077,7 @@ static void wizard(int target)
     /* save for this model */
     struct pad *p = &pads[target];
     int k;
-    for (k = 0; k < nsaved && strcmp(saved[k].id, p->id); k++)
+    for (k = 0; k < nsaved && (strcmp(saved[k].id, p->id) || !map_fits(p, saved[k].map)); k++)
         ;
     if (k == nsaved && nsaved < 32)
         nsaved++;
