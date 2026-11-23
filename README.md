@@ -55,6 +55,9 @@ stick boots exactly as before, and a single command restores the original boot p
 - 50 Hz (PAL) games are paced correctly on the 60 Hz HDMI output; audio is resampled
   to the HDMI rate.
 - Detailed logs on the SD (`stickos/logs/`) for troubleshooting.
+- Optional **Linux 6.18** kernel started from the SD, without writing the flash: both CPUs,
+  HDMI audio, page flipping, faster SD (branch `kernel-6.18`, see
+  [`kernel/README.md`](kernel/README.md)).
 
 ## Hardware
 
