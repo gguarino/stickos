@@ -1,0 +1,12 @@
+// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
+/* Full version with the SD on 4 data lines */
+#include "rk3066a-segam-m8.dts"
+
+/ {
+	model = "SEGAM M8 V5.0 (SD 4 bit)";
+};
+
+&mmc0 {
+	bus-width = <4>;
+	pinctrl-0 = <&sd0_clk &sd0_cmd &sd0_bus4>;
+};

@@ -32,6 +32,7 @@ rd 0x20008188 "GRF phy1 con0"
 rd 0x2000815c "GRF soc status"
 rd 0x101c0040 "host controller id"
 rd 0x10180040 "otg controller id"
+rd 0x200080dc "GRF GPIO3B iomux: SD data pins B2-B5, 1 = SD"
 echo 0 > /sys/bus/platform/drivers_autoprobe
 run insmod $K/dwc2.ko
 for d in 101c0000 10180000; do
