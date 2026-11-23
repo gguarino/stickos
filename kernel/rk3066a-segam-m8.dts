@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: (GPL-2.0+ OR MIT)
-/* Full version: display driver (VOP0 + HDMI, 1280x720, page flipping) and HDMI audio.
+/* Full version: both CPUs, display driver (VOP0 + HDMI, 1280x720, page flipping), HDMI audio.
  * Until the display driver starts, the console is on the stock picture (simplefb). */
 /dts-v1/;
 #include "rk3066a-segam-m8.dtsi"
@@ -8,7 +8,7 @@
 	model = "SEGAM M8 V5.0";
 
 	chosen {
-		bootargs = "console=tty0 loglevel=4 clk_ignore_unused pd_ignore_unused regulator_ignore_unused maxcpus=1 oops=panic panic=120 video=HDMI-A-1:1280x720-16@60 rdinit=/init";
+		bootargs = "console=tty0 loglevel=4 clk_ignore_unused pd_ignore_unused regulator_ignore_unused oops=panic panic=120 video=HDMI-A-1:1280x720-16@60 rdinit=/init";
 	};
 
 	hdmi-con {

@@ -1,6 +1,7 @@
 #!/bin/busybox sh
-# /init of the bring-up initrd: tries the SD step by step with the results on the screen,
-# then starts the real init (stickinit). If a step hangs, after 60 s prints what is blocked.
+# /init of the initrd: starts the real init (stickinit). With the file stickos/kernel/debug on
+# the SD it first tries the SD step by step with the results on the screen; if a step hangs,
+# after 60 s it prints what is blocked.
 export PATH=/bin
 /bin/busybox mkdir -p /bin /proc /sys /dev /m /tmp
 /bin/busybox --install -s /bin
@@ -42,6 +43,17 @@ for i in $(seq 100); do
     sleep 0.1
 done
 say "$(cat /proc/device-tree/model)"
+# normal start: the tests only with the file stickos/kernel/debug on the SD
+dbg=
+if [ -n "$d" ] && mount -t vfat -o ro $d /m 2>/dev/null; then
+    [ -e /m/stickos/kernel/debug ] && dbg=1
+    umount /m
+fi
+if [ -z "$dbg" ]; then
+    touch /finished
+    umount /sys/kernel/debug
+    exec /stickinit
+fi
 fail() {
     say "SD FAILED: $*"
     say "nothing was written to the SD. Switch off and on: the next variant is tried"
