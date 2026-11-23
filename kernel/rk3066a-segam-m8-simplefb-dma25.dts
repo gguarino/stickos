@@ -7,6 +7,8 @@
 };
 
 &mmc0 {
+	dmas = <&dmac2 1>;
+	dma-names = "rx-tx";
 	max-frequency = <25000000>;
 	/delete-property/ cap-sd-highspeed;
 };

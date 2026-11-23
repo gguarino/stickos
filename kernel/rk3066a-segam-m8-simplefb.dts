@@ -38,9 +38,12 @@
 	/delete-property/ assigned-clock-rates;
 };
 
+/* SD without DMA: with the DMA controller (pl330) the SD hangs on 1 MB reads */
 &mmc0 {
 	bus-width = <1>;
 	pinctrl-0 = <&sd0_clk &sd0_cmd &sd0_bus1>;
+	/delete-property/ dmas;
+	/delete-property/ dma-names;
 };
 
 /* the stock LCDC keeps scanning the framebuffer */

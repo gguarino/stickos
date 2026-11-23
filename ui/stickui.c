@@ -216,7 +216,7 @@ static int fb = -1;
 static uint8_t *fbmem;
 static struct fb_var_screeninfo var;
 static struct fb_fix_screeninfo fix;
-static int XRES, YRES, STRIDE, back = 1;
+static int XRES, YRES, STRIDE, back = 1, pages = 2;
 static uint16_t *ui;                         /* menu buffer (RAM) */
 
 static int video_init(void)
@@ -246,8 +246,14 @@ static int video_init(void)
         logm("mmap fb: %s", strerror(errno));
         return -1;
     }
+    /* a single page (e.g. simple-framebuffer on the new kernel): draws on the shown page */
+    if (var.yres_virtual < 2 * var.yres || fix.smem_len < 2 * (size_t)YRES * fix.line_length) {
+        pages = 1;
+        back = 0;
+    }
     ui = calloc((size_t)XRES * YRES, 2);
-    logm("video %dx%d bpp %d stride %d virt %d", XRES, YRES, var.bits_per_pixel, STRIDE, var.yres_virtual);
+    logm("video %dx%d bpp %d stride %d virt %d pages %d", XRES, YRES, var.bits_per_pixel, STRIDE,
+         var.yres_virtual, pages);
     return 0;
 }
 
@@ -259,8 +265,14 @@ static uint16_t *page(int p)
 static double vs_t;                         /* time of the last known vsync */
 #define VS_PERIOD (1.0 / 60.1)
 
+static void wait_vsync(void);
+
 static void present(void)
 {
+    if (pages == 1) {                        /* no page flipping: keeps the pace only */
+        wait_vsync();
+        return;
+    }
     var.yoffset = back * YRES;
     ioctl(fb, FBIOPAN_DISPLAY, &var);       /* returns at vsync */
     back ^= 1;
@@ -292,7 +304,7 @@ static void wait_vsync(void)
 
 static void clear_pages(void)
 {
-    for (int p = 0; p < 2; p++)
+    for (int p = 0; p < pages; p++)
         for (int y = 0; y < YRES; y++)
             memset(page(p) + (size_t)y * STRIDE, 0, XRES * 2);
 }
@@ -1487,7 +1499,7 @@ static int run_game(const struct sys *s, const char *file, const char *title)
         ;
     logm("game ended: status %d", st);
     var.yoffset = 0;
-    back = 1;
+    back = pages - 1;
     input_scan();
     menu_release_all();
     return st;
