@@ -48,14 +48,14 @@ stickos/kernel/always         empty file: use the new kernel at every start
 
 A line of `try` is removed (and written to `tried`) before jumping: if the new kernel does
 not work, switch the stick off and on and, after the last line, the stock kernel is back.
-The list ends early if one of the device trees reaches StickOS.
+The list ends early if one of the device trees gets to the end of `new.sh`.
 With an empty `stickos/kernel/watchdog` file the watchdog resets the stick after about
 28 s if the new kernel hangs; the log it left
 in RAM is then saved as `stickos/logs/ramoops.bin` (`tried` becomes `done`).
 Logs: `stickos/logs/kjump.log`, `dmesg-stock.log`, `dmesg-new.log`, `initrd.log`, `new.log`
 (with the name of the .dtb after the next start of the stock kernel).
-The initrd (`initrd.sh`) tries the SD step by step on the screen before starting StickOS; if a
-step takes more than 20 s it prints what is blocked.
+The initrd (`initrd.sh`) tries the SD step by step on the screen before starting StickOS (only
+reading, until it has proved to work); if a step takes more than 60 s it prints what is blocked.
 
 The whole screen turns into a colour to show how far the jump got: red = kernel mode,
 green = caches and MMU off, blue = images copied, kernel about to start.

@@ -1,0 +1,12 @@
+// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
+/* Bring-up variant: SD with DMA at 25 MHz (default speed instead of high speed) */
+#include "rk3066a-segam-m8-simplefb.dts"
+
+/ {
+	model = "SEGAM M8 V5.0 (simplefb, SD DMA 25 MHz)";
+};
+
+&mmc0 {
+	max-frequency = <25000000>;
+	/delete-property/ cap-sd-highspeed;
+};

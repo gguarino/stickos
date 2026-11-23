@@ -1,8 +1,8 @@
 #!/bin/busybox sh
 # /init of the bring-up initrd: tries the SD step by step with the results on the screen,
-# then starts the real init (stickinit). If a step hangs, after 20 s prints what is blocked.
+# then starts the real init (stickinit). If a step hangs, after 60 s prints what is blocked.
 export PATH=/bin
-/bin/busybox mkdir -p /bin /proc /sys /dev /m
+/bin/busybox mkdir -p /bin /proc /sys /dev /m /tmp
 /bin/busybox --install -s /bin
 mount -t proc proc /proc
 mount -t sysfs sysfs /sys
@@ -30,7 +30,7 @@ step() { echo "$*" > /step; say "$*"; }
         s=$(cat /step 2>/dev/null)
         [ "$s" = "$last" ] && n=$((n + 1)) || n=0
         last=$s
-        [ $n = 20 ] && diag
+        [ $n = 60 ] && diag
     done
 ) &
 step "waiting for the SD"
@@ -41,12 +41,28 @@ for i in $(seq 100); do
     done
     sleep 0.1
 done
-step "SD is $d, reading 4 MB"
-dd if=$d of=/dev/null bs=64k count=64 2>&1 | tail -n1
+say "$(cat /proc/device-tree/model)"
+fail() {
+    say "SD FAILED: $*"
+    say "nothing was written to the SD. Switch off and on: the next variant is tried"
+    touch /finished
+    exec sleep 100000
+}
+# reading only, until the SD has proved to work: a broken SD is never written
+step "SD is $d, reading 64 MB in 1 MB blocks"
+echo 3 > /proc/sys/vm/drop_caches
+t0=$(cut -d' ' -f1 /proc/uptime)
+dd if=$d of=/dev/null bs=1M count=64 2>/tmp/dd || fail "read error"
+say "$(tail -n1 /tmp/dd), from $t0 to $(cut -d' ' -f1 /proc/uptime) s"
 step "mounting read-only"
-mount -t vfat -o ro $d /m || say "mount failed"
-step "reading system.sqfs"
-sha256sum /m/stickos/system.sqfs
+mount -t vfat -o ro $d /m || fail "mount"
+for i in 1 2; do
+    step "reading system.sqfs ($i)"
+    echo 3 > /proc/sys/vm/drop_caches
+    sha256sum /m/stickos/system.sqfs > /tmp/sum$i || fail "read error"
+    cut -c1-16 /tmp/sum$i
+done
+cmp -s /tmp/sum1 /tmp/sum2 || fail "the two readings are different"
 umount /m
 step "mounting read-write"
 mount -t vfat -o rw $d /m || say "mount failed"
