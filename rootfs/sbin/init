@@ -29,7 +29,7 @@ case $(uname -r) in 3.0.36*)
         kjump -d $D/ramoops.bin > $D/kjump-ram.log 2>&1
         T=$(cat $K/tried)
         grep -q " end$" $D/new.log 2>/dev/null && rm -f $K/try   # all steps done: no need for the others
-        for f in kjump initrd new dmesg-new clk-new; do
+        for f in kjump initrd new dmesg-new clk-new drm-state; do
             [ -f $D/$f.log ] && mv $D/$f.log $D/$f-${T%.dtb}.log
         done
         mv $K/tried $K/done

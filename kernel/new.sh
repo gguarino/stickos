@@ -46,5 +46,12 @@ echo 1 > /sys/bus/platform/drivers_autoprobe
 run cat /proc/bus/input/devices
 run ls -l /sys/bus/hid/devices/
 run cat /proc/interrupts
+step "display and audio"
+run ls -l /dev/dri /dev/snd /dev/fb0
+for c in /sys/class/drm/card*-*; do
+    [ -e $c/status ] && echo "  $c: $(cat $c/status), modes: $(cat $c/modes | tr '\n' ' ')" >> $L
+done
+run cat /proc/asound/cards /proc/asound/pcm
+cat /sys/kernel/debug/dri/0/state > $D/drm-state.log 2>&1
 dmesg > $D/dmesg-new.log
 step "end"

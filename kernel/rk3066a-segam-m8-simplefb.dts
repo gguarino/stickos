@@ -8,42 +8,8 @@
 	model = "SEGAM M8 V5.0 (simplefb)";
 
 	chosen {
-		#address-cells = <1>;
-		#size-cells = <1>;
-		ranges;
 		bootargs = "console=tty0 loglevel=4 clk_ignore_unused pd_ignore_unused regulator_ignore_unused maxcpus=1 oops=panic panic=120 rdinit=/init";
-
-		framebuffer@6f400000 {
-			compatible = "simple-framebuffer";
-			reg = <0x6f400000 (1280 * 720 * 2)>;
-			width = <1280>;
-			height = <720>;
-			stride = <2560>;
-			format = "r5g6b5";
-			status = "okay";
-		};
 	};
-
-	reserved-memory {
-		stock_fb: framebuffer@6f400000 {
-			reg = <0x6f400000 0x400000>;
-			no-map;
-		};
-	};
-};
-
-/* mainline would change the PLLs here: the picture (and more) depends on them */
-&cru {
-	/delete-property/ assigned-clocks;
-	/delete-property/ assigned-clock-rates;
-};
-
-/* SD without DMA: with the DMA controller (pl330) the SD hangs on 1 MB reads */
-&mmc0 {
-	bus-width = <1>;
-	pinctrl-0 = <&sd0_clk &sd0_cmd &sd0_bus1>;
-	/delete-property/ dmas;
-	/delete-property/ dma-names;
 };
 
 /* the stock LCDC keeps scanning the framebuffer */

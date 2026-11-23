@@ -5,7 +5,8 @@
  *   stickui --play CORE ROM SYSTEM    runs a game (child process of the menu)
  *   stickui --options CORE FILE [ROM] writes the options a core declares to FILE
  *
- * Video: /dev/fb0 1280x720 RGB565, double buffer with FBIOPAN_DISPLAY (waits for vsync).
+ * Video: 1280x720 RGB565 with double buffer. With a KMS driver (/dev/dri/card0, Linux 6.x):
+ * dumb buffer and page flip; otherwise /dev/fb0 with FBIOPAN_DISPLAY (waits for vsync).
  * Audio: ALSA through direct ioctls, resampling with dynamic rate control.
  * Input: evdev; buttons configurable per joypad model (/sd/stickos/joypad.cfg).
  * Menu language: /sd/stickos/stickos.cfg, translations in lang.h.
@@ -20,6 +21,9 @@
 #include <linux/fb.h>
 #include <linux/input.h>
 #include <linux/kd.h>
+#include <drm/drm.h>
+#include <drm/drm_fourcc.h>
+#include <drm/drm_mode.h>
 #include <poll.h>
 #include <signal.h>
 #include <sound/asound.h>
@@ -221,21 +225,183 @@ static struct fb_fix_screeninfo fix;
 static int XRES, YRES, STRIDE, back = 1, pages = 2;
 static uint16_t *ui;                         /* menu buffer (RAM) */
 
+/* KMS: one dumb buffer of two pages, one framebuffer per page */
+static int drm = -1;
+static uint32_t drm_crtc, drm_conn, drm_fb[2];
+static struct drm_mode_modeinfo drm_mode;
+
+static int drm_io(unsigned long req, void *arg)
+{
+    int r;
+    while ((r = ioctl(drm, req, arg)) < 0 && (errno == EINTR || errno == EAGAIN))
+        ;
+    return r;
+}
+
+static int drm_show(int p)                  /* page p on screen, now (no wait) */
+{
+    struct drm_mode_crtc c = { 0 };
+    c.crtc_id = drm_crtc;
+    c.fb_id = drm_fb[p];
+    c.set_connectors_ptr = (uintptr_t)&drm_conn;
+    c.count_connectors = 1;
+    c.mode = drm_mode;
+    c.mode_valid = 1;
+    return drm_io(DRM_IOCTL_MODE_SETCRTC, &c);
+}
+
+static int kms_init(void)
+{
+    drm = open("/dev/dri/card0", O_RDWR | O_CLOEXEC);
+    if (drm < 0)
+        return -1;
+    struct drm_mode_card_res res = { 0 };
+    uint32_t crtcs[8], conns[8], encs[8];
+    if (drm_io(DRM_IOCTL_MODE_GETRESOURCES, &res))
+        goto fail;
+    if (res.count_crtcs > 8 || res.count_connectors > 8 || res.count_encoders > 8)
+        goto fail;
+    res.count_fbs = 0;
+    res.crtc_id_ptr = (uintptr_t)crtcs;
+    res.connector_id_ptr = (uintptr_t)conns;
+    res.encoder_id_ptr = (uintptr_t)encs;
+    if (drm_io(DRM_IOCTL_MODE_GETRESOURCES, &res) || !res.count_crtcs)
+        goto fail;
+    drm_conn = 0;
+    for (unsigned i = 0; i < res.count_connectors && !drm_conn; i++) {
+        struct drm_mode_get_connector c = { 0 };
+        c.connector_id = conns[i];
+        if (drm_io(DRM_IOCTL_MODE_GETCONNECTOR, &c))    /* probes the monitor */
+            continue;
+        if (c.connection != 1 || !c.count_modes)
+            continue;
+        struct drm_mode_modeinfo modes[64];
+        uint32_t cencs[8];
+        if (c.count_modes > 64)
+            c.count_modes = 64;
+        if (c.count_encoders > 8)
+            c.count_encoders = 8;
+        c.modes_ptr = (uintptr_t)modes;
+        c.encoders_ptr = (uintptr_t)cencs;
+        c.count_props = 0;
+        if (drm_io(DRM_IOCTL_MODE_GETCONNECTOR, &c))
+            continue;
+        int best = -1;                      /* 1280x720, 60 Hz if there is */
+        for (unsigned m = 0; m < c.count_modes; m++)
+            if (modes[m].hdisplay == 1280 && modes[m].vdisplay == 720 &&
+                !(modes[m].flags & DRM_MODE_FLAG_INTERLACE) &&
+                (best < 0 || (modes[m].vrefresh == 60 && modes[best].vrefresh != 60)))
+                best = m;
+        if (best < 0) {
+            logm("kms: the TV has no 1280x720 mode");
+            continue;
+        }
+        drm_mode = modes[best];
+        drm_crtc = 0;
+        struct drm_mode_get_encoder e = { 0 };
+        e.encoder_id = c.encoder_id ? c.encoder_id : (c.count_encoders ? cencs[0] : 0);
+        if (e.encoder_id && drm_io(DRM_IOCTL_MODE_GETENCODER, &e) == 0) {
+            drm_crtc = e.crtc_id;
+            for (unsigned k = 0; !drm_crtc && k < res.count_crtcs; k++)
+                if (e.possible_crtcs & (1u << k))
+                    drm_crtc = crtcs[k];
+        }
+        if (drm_crtc)
+            drm_conn = conns[i];
+    }
+    if (!drm_conn) {
+        logm("kms: no connected screen");
+        goto fail;
+    }
+    struct drm_mode_create_dumb cd = { 0 };
+    cd.width = 1280;
+    cd.height = 2 * 720;
+    cd.bpp = 16;
+    if (drm_io(DRM_IOCTL_MODE_CREATE_DUMB, &cd)) {
+        logm("kms: dumb buffer: %s", strerror(errno));
+        goto fail;
+    }
+    for (int p = 0; p < 2; p++) {
+        struct drm_mode_fb_cmd2 f = { 0 };
+        f.width = 1280;
+        f.height = 720;
+        f.pixel_format = DRM_FORMAT_RGB565;
+        f.handles[0] = cd.handle;
+        f.pitches[0] = cd.pitch;
+        f.offsets[0] = p * 720 * cd.pitch;
+        if (drm_io(DRM_IOCTL_MODE_ADDFB2, &f)) {
+            logm("kms: framebuffer: %s", strerror(errno));
+            goto fail;
+        }
+        drm_fb[p] = f.fb_id;
+    }
+    struct drm_mode_map_dumb md = { 0 };
+    md.handle = cd.handle;
+    if (drm_io(DRM_IOCTL_MODE_MAP_DUMB, &md))
+        goto fail;
+    fbmem = mmap(NULL, cd.size, PROT_READ | PROT_WRITE, MAP_SHARED, drm, md.offset);
+    if (fbmem == MAP_FAILED) {
+        logm("kms: mmap: %s", strerror(errno));
+        goto fail;
+    }
+    memset(fbmem, 0, cd.size);
+    if (drm_show(0)) {
+        logm("kms: set mode: %s", strerror(errno));
+        munmap(fbmem, cd.size);
+        goto fail;
+    }
+    XRES = 1280;
+    YRES = 720;
+    fix.line_length = cd.pitch;
+    STRIDE = cd.pitch / 2;
+    var.bits_per_pixel = 16;
+    var.yres_virtual = 2 * YRES;
+    pages = 2;
+    back = 1;
+    logm("kms: %s %d Hz, crtc %u connector %u", drm_mode.name, drm_mode.vrefresh, drm_crtc, drm_conn);
+    return 0;
+fail:
+    close(drm);                             /* also frees buffers and framebuffers */
+    drm = -1;
+    return -1;
+}
+
+/* the game (child process) needs the screen: only one process at a time can set it */
+static void video_release(void)
+{
+    if (drm >= 0)
+        ioctl(drm, DRM_IOCTL_DROP_MASTER, 0);
+}
+
+static void video_take_back(void)
+{
+    if (drm < 0)
+        return;
+    if (ioctl(drm, DRM_IOCTL_SET_MASTER, 0))
+        logm("kms: set master: %s", strerror(errno));
+    drm_show(0);
+    back = 1;
+}
+
 static int video_init(void)
 {
-    fb = open("/dev/fb0", O_RDWR | O_CLOEXEC);
-    if (fb < 0)
-        fb = open("/dev/graphics/fb0", O_RDWR | O_CLOEXEC);
-    if (fb < 0) {
-        logm("fb0: %s", strerror(errno));
-        return -1;
-    }
     /* text console in graphics mode: the kernel does not write over the picture any more */
     int tty = open("/dev/tty0", O_RDWR | O_CLOEXEC);
     if (tty >= 0) {
         if (ioctl(tty, KDSETMODE, KD_GRAPHICS))
             logm("KDSETMODE: %s", strerror(errno));
         close(tty);
+    }
+    if (kms_init() == 0) {
+        ui = calloc((size_t)XRES * YRES, 2);
+        return 0;
+    }
+    fb = open("/dev/fb0", O_RDWR | O_CLOEXEC);
+    if (fb < 0)
+        fb = open("/dev/graphics/fb0", O_RDWR | O_CLOEXEC);
+    if (fb < 0) {
+        logm("fb0: %s", strerror(errno));
+        return -1;
     }
     ioctl(fb, FBIOGET_VSCREENINFO, &var);
     if (var.yres_virtual < 2 * var.yres || var.bits_per_pixel != 16) {
@@ -280,6 +446,28 @@ static void present(void)
 {
     if (pages == 1) {                        /* no page flipping: keeps the pace only */
         wait_vsync();
+        return;
+    }
+    if (drm >= 0) {                         /* page flip at the next vsync, and wait for it */
+        struct drm_mode_crtc_page_flip f = { 0 };
+        f.crtc_id = drm_crtc;
+        f.fb_id = drm_fb[back];
+        f.flags = DRM_MODE_PAGE_FLIP_EVENT;
+        if (drm_io(DRM_IOCTL_MODE_PAGE_FLIP, &f) == 0) {
+            struct pollfd pf = { drm, POLLIN, 0 };
+            if (poll(&pf, 1, 100) > 0) {
+                char ev[256];
+                if (read(drm, ev, sizeof(ev)) < 0) {
+                }
+            }
+        } else {
+            static int warned;
+            if (!warned++)
+                logm("kms: page flip: %s", strerror(errno));
+            drm_show(back);
+        }
+        back ^= 1;
+        vs_t = now();
         return;
     }
     var.yoffset = back * YRES;
@@ -1519,6 +1707,7 @@ static int run_game(const struct sys *s, const char *file, const char *title)
     }
     logm("starting %s with %s", rom, core);
     input_close_all();
+    video_release();
     pid_t pid = fork();
     if (pid == 0) {
         execl("/proc/self/exe", "stickui", "--play", core, rom, s->dir, (char *)NULL);
@@ -1530,6 +1719,7 @@ static int run_game(const struct sys *s, const char *file, const char *title)
     logm("game ended: status %d", st);
     var.yoffset = 0;
     back = pages - 1;
+    video_take_back();
     input_scan();
     menu_release_all();
     return st;

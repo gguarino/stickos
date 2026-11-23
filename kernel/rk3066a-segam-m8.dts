@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: (GPL-2.0+ OR MIT)
-/* Full version: KMS display, HDMI audio, GPU. */
+/* Full version: display driver (VOP0 + HDMI, 1280x720, page flipping) and HDMI audio.
+ * Until the display driver starts, the console is on the stock picture (simplefb). */
 /dts-v1/;
 #include "rk3066a-segam-m8.dtsi"
 
@@ -7,7 +8,7 @@
 	model = "SEGAM M8 V5.0";
 
 	chosen {
-		bootargs = "console=ttyS2,115200 console=tty0 loglevel=8 clk_ignore_unused video=HDMI-A-1:1280x720-16@60 rdinit=/init";
+		bootargs = "console=tty0 loglevel=4 clk_ignore_unused pd_ignore_unused regulator_ignore_unused maxcpus=1 oops=panic panic=120 video=HDMI-A-1:1280x720-16@60 rdinit=/init";
 	};
 
 	hdmi-con {
@@ -20,10 +21,6 @@
 			};
 		};
 	};
-};
-
-&gpu {
-	status = "okay";
 };
 
 &hdmi {
@@ -44,7 +41,10 @@
 	status = "okay";
 };
 
+/* HDMI audio: I2S0 is connected to the HDMI block inside the chip, its pins are not used */
 &i2s0 {
+	/delete-property/ pinctrl-names;
+	/delete-property/ pinctrl-0;
 	status = "okay";
 };
 
