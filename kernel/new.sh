@@ -14,6 +14,7 @@ t0=$(cut -d' ' -f1 /proc/uptime)
 echo 3 > /proc/sys/vm/drop_caches
 dd if=/dev/mmcblk0 of=/dev/null bs=1M count=32 2>> $L
 echo "  from $t0 to $(cut -d' ' -f1 /proc/uptime)" >> $L
+run cat /sys/devices/system/cpu/online
 run cat /proc/cpuinfo
 run cat /proc/meminfo
 run cat /proc/iomem

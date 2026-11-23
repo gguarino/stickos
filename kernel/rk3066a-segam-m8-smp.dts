@@ -1,0 +1,11 @@
+// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
+/* Full version with both CPUs */
+#include "rk3066a-segam-m8.dts"
+
+/ {
+	model = "SEGAM M8 V5.0 (2 CPUs)";
+
+	chosen {
+		bootargs = "console=tty0 loglevel=4 clk_ignore_unused pd_ignore_unused regulator_ignore_unused oops=panic panic=120 video=HDMI-A-1:1280x720-16@60 rdinit=/init";
+	};
+};

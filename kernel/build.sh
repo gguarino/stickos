@@ -18,7 +18,7 @@ d=$src/arch/arm/boot/dts/rockchip
 cp "$here"/rk3066a-segam-m8*.dts* "$d"/
 KCONFIG_ALLCONFIG="$here/stick.config" make -s -C "$src" O="$b" allnoconfig
 make -s -C "$src" O="$b" -j"$(nproc)" zImage modules rockchip/rk3066a-segam-m8.dtb rockchip/rk3066a-segam-m8-simplefb.dtb \
-    rockchip/rk3066a-segam-m8-simplefb-dma25.dtb rockchip/rk3066a-segam-m8-sd4.dtb
+    rockchip/rk3066a-segam-m8-simplefb-dma25.dtb rockchip/rk3066a-segam-m8-smp.dtb
 mkdir -p "$here/../out/kernel"
 cp "$b"/drivers/usb/dwc2/dwc2.ko "$here/../out/kernel/"
 cp "$b"/arch/arm/boot/zImage "$b"/arch/arm/boot/dts/rockchip/rk3066a-segam-m8*.dtb "$here/../out/kernel/"

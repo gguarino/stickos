@@ -81,18 +81,18 @@
 };
 
 /* SD without DMA: with the DMA controller (pl330) the SD hangs on 1 MB reads.
- * 1 bit for now: 4 bits not tried yet */
+ * 4 data lines: about 18 MB/s */
 &mmc0 {
 	/delete-property/ dmas;
 	/delete-property/ dma-names;
-	bus-width = <1>;
+	bus-width = <4>;
 	cap-mmc-highspeed;
 	cap-sd-highspeed;
 	broken-cd;
 	disable-wp;
 	no-mmc;
 	no-sdio;
-	pinctrl-0 = <&sd0_clk &sd0_cmd &sd0_bus1>;
+	pinctrl-0 = <&sd0_clk &sd0_cmd &sd0_bus4>;
 	vmmc-supply = <&vcc_io>;
 	vqmmc-supply = <&vcc_io>;
 	status = "okay";
