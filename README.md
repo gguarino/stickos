@@ -56,8 +56,7 @@ stick boots exactly as before, and a single command restores the original boot p
   to the HDMI rate.
 - Detailed logs on the SD (`stickos/logs/`) for troubleshooting.
 - Optional **Linux 6.18** kernel started from the SD, without writing the flash: both CPUs,
-  HDMI audio, page flipping, faster SD (branch `kernel-6.18`, see
-  [`kernel/README.md`](kernel/README.md)).
+  HDMI audio, page flipping, faster SD (see [`kernel/README.md`](kernel/README.md)).
 
 ## Hardware
 
@@ -148,7 +147,7 @@ The ready images live in [`images/`](images/):
 |---|---|
 | `images/system.sqfs` | the OS: copy it to the SD as `stickos/system.sqfs` |
 | `images/stickinit` | the new `/init` for the boot partition (static ARM binary) |
-| `images/kernel/` | Linux 6.18 for the stick, started from the SD (branch `kernel-6.18`, see [`kernel/README.md`](kernel/README.md)) |
+| `images/kernel/` | Linux 6.18 for the stick, started from the SD (see [`kernel/README.md`](kernel/README.md)) |
 | `images/SHA256SUMS` | checksums |
 
 The boot partition image is **not** distributed, because it contains the manufacturer's
