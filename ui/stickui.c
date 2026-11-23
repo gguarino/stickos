@@ -5,8 +5,9 @@
  *   stickui --play CORE ROM SYSTEM    runs a game (child process of the menu)
  *   stickui --options CORE FILE [ROM] writes the options a core declares to FILE
  *
- * Video: 1280x720 RGB565 with double buffer. With a KMS driver (/dev/dri/card0, Linux 6.x):
- * dumb buffer and page flip; otherwise /dev/fb0 with FBIOPAN_DISPLAY (waits for vsync).
+ * Video: 1280x720 RGB565. With a KMS driver (/dev/dri/card0, Linux 6.x): three buffers and
+ * page flip without waiting (only for the previous flip); otherwise /dev/fb0 with two buffers
+ * and FBIOPAN_DISPLAY (waits for vsync).
  * Audio: ALSA through direct ioctls, resampling with dynamic rate control.
  * Input: evdev; buttons configurable per joypad model (/sd/stickos/joypad.cfg).
  * Menu language: /sd/stickos/stickos.cfg, translations in lang.h.
@@ -225,9 +226,13 @@ static struct fb_fix_screeninfo fix;
 static int XRES, YRES, STRIDE, back = 1, pages = 2;
 static uint16_t *ui;                         /* menu buffer (RAM) */
 
-/* KMS: one dumb buffer of two pages, one framebuffer per page */
-static int drm = -1;
-static uint32_t drm_crtc, drm_conn, drm_fb[2];
+/* KMS: one dumb buffer of three pages, one framebuffer per page. One page is on screen,
+ * one may be waiting for its flip (at the next vsync), the third is drawn. */
+#define KMS_PAGES 3
+static int drm = -1, drm_shown, drm_pending = -1, drm_pipe;
+static uint32_t vbl_last;                   /* vsync counter at the last step */
+static int vbl_valid;
+static uint32_t drm_crtc, drm_conn, drm_fb[KMS_PAGES];
 static struct drm_mode_modeinfo drm_mode;
 
 static int drm_io(unsigned long req, void *arg)
@@ -306,6 +311,9 @@ static int kms_init(void)
                 if (e.possible_crtcs & (1u << k))
                     drm_crtc = crtcs[k];
         }
+        for (unsigned k = 0; k < res.count_crtcs; k++)     /* index, for the vsync counter */
+            if (crtcs[k] == drm_crtc)
+                drm_pipe = k;
         if (drm_crtc)
             drm_conn = conns[i];
     }
@@ -315,13 +323,13 @@ static int kms_init(void)
     }
     struct drm_mode_create_dumb cd = { 0 };
     cd.width = 1280;
-    cd.height = 2 * 720;
+    cd.height = KMS_PAGES * 720;
     cd.bpp = 16;
     if (drm_io(DRM_IOCTL_MODE_CREATE_DUMB, &cd)) {
         logm("kms: dumb buffer: %s", strerror(errno));
         goto fail;
     }
-    for (int p = 0; p < 2; p++) {
+    for (int p = 0; p < KMS_PAGES; p++) {
         struct drm_mode_fb_cmd2 f = { 0 };
         f.width = 1280;
         f.height = 720;
@@ -355,8 +363,10 @@ static int kms_init(void)
     fix.line_length = cd.pitch;
     STRIDE = cd.pitch / 2;
     var.bits_per_pixel = 16;
-    var.yres_virtual = 2 * YRES;
-    pages = 2;
+    var.yres_virtual = KMS_PAGES * YRES;
+    pages = KMS_PAGES;
+    drm_shown = 0;
+    drm_pending = -1;
     back = 1;
     logm("kms: %s %d Hz, crtc %u connector %u", drm_mode.name, drm_mode.vrefresh, drm_crtc, drm_conn);
     return 0;
@@ -380,6 +390,9 @@ static void video_take_back(void)
     if (ioctl(drm, DRM_IOCTL_SET_MASTER, 0))
         logm("kms: set master: %s", strerror(errno));
     drm_show(0);
+    drm_shown = 0;
+    drm_pending = -1;
+    vbl_valid = 0;
     back = 1;
 }
 
@@ -442,31 +455,87 @@ static double vs_t;                         /* time of the last known vsync */
 
 static void wait_vsync(void);
 
+/* waits for the page flip in progress, if any (it ends at a vsync); ms = maximum wait */
+static void drm_wait_flip(int ms)
+{
+    if (drm_pending < 0)
+        return;
+    struct pollfd pf = { drm, POLLIN, 0 };
+    if (poll(&pf, 1, ms) > 0) {
+        char ev[256];
+        if (read(drm, ev, sizeof(ev)) < 0) {
+        }
+    } else if (ms == 0) {
+        return;                             /* still in progress */
+    } else {
+        static int warned;
+        if (warned++ < 3)
+            logm("kms: no page flip event after %d ms", ms);
+    }
+    drm_shown = drm_pending;
+    drm_pending = -1;
+}
+
+/* one game/menu step = one vsync: waits for the vsync after the one of the previous step;
+ * if that one has already gone (the step was late), does not wait at all */
+static int drm_vblank(uint32_t type, uint32_t seq, uint32_t *out)
+{
+    union drm_wait_vblank v = { 0 };
+    v.request.type = type | (drm_pipe == 1 ? _DRM_VBLANK_SECONDARY :
+                             (drm_pipe << _DRM_VBLANK_HIGH_CRTC_SHIFT) & _DRM_VBLANK_HIGH_CRTC_MASK);
+    v.request.sequence = seq;
+    if (drm_io(DRM_IOCTL_WAIT_VBLANK, &v))
+        return -1;
+    *out = v.reply.sequence;
+    return 0;
+}
+
+static void drm_wait_tick(void)
+{
+    uint32_t cur;
+    if (drm_vblank(_DRM_VBLANK_RELATIVE, 0, &cur)) {    /* no vsync counter: by time */
+        static int warned;
+        if (!warned++)
+            logm("kms: vsync counter: %s", strerror(errno));
+        usleep(16667);
+        return;
+    }
+    if (!vbl_valid || (int32_t)(cur - (vbl_last + 1)) >= 0) {
+        vbl_last = cur;                     /* late (or first step): go on at once */
+        vbl_valid = 1;
+        return;
+    }
+    if (drm_vblank(_DRM_VBLANK_ABSOLUTE, vbl_last + 1, &cur) == 0)
+        vbl_last = cur;
+    else
+        vbl_last++;
+}
+
 static void present(void)
 {
     if (pages == 1) {                        /* no page flipping: keeps the pace only */
         wait_vsync();
         return;
     }
-    if (drm >= 0) {                         /* page flip at the next vsync, and wait for it */
+    if (drm >= 0) {                         /* page flip at the next vsync, then one step */
+        drm_wait_flip(50);                  /* the previous one (normally already done) */
         struct drm_mode_crtc_page_flip f = { 0 };
         f.crtc_id = drm_crtc;
         f.fb_id = drm_fb[back];
         f.flags = DRM_MODE_PAGE_FLIP_EVENT;
         if (drm_io(DRM_IOCTL_MODE_PAGE_FLIP, &f) == 0) {
-            struct pollfd pf = { drm, POLLIN, 0 };
-            if (poll(&pf, 1, 100) > 0) {
-                char ev[256];
-                if (read(drm, ev, sizeof(ev)) < 0) {
-                }
-            }
+            drm_pending = back;
+            back = KMS_PAGES - drm_shown - back;    /* neither on screen nor waiting */
         } else {
             static int warned;
             if (!warned++)
                 logm("kms: page flip: %s", strerror(errno));
             drm_show(back);
+            drm_shown = back;
+            back = (back + 1) % KMS_PAGES;
         }
-        back ^= 1;
+        drm_wait_tick();
+        drm_wait_flip(0);
         vs_t = now();
         return;
     }
@@ -487,6 +556,12 @@ static volatile int wd_in_core;
 static void wait_vsync(void)
 {
     wd_count++;
+    if (drm >= 0) {
+        drm_wait_tick();
+        drm_wait_flip(0);
+        vs_t = now();
+        return;
+    }
     double t = vs_t + VS_PERIOD, n = now();
     if (t < n - VS_PERIOD) {                /* more than one frame late: realign */
         vs_t = n;

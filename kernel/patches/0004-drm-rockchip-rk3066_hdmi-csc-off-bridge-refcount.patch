@@ -1,0 +1,54 @@
+From: StickOS <dev@pinux.xyz>
+Subject: [PATCH] drm/rockchip: rk3066_hdmi: color space converter off, refcounted bridge
+
+- The RGB -> YCbCr converter (AV_CTRL2 bit 0) is never written by the driver: when the
+  vendor kernel left it on (it sends YCbCr to the TV), the picture is YCbCr announced as
+  RGB in the AVI infoframe (purple colours).
+- The bridge is embedded in a devm_kzalloc'ed struct, so its reference count starts at
+  0 and drm_bridge_get() warns "addition on 0; use-after-free": allocate it with
+  devm_drm_bridge_alloc().
+
+---
+--- a/drivers/gpu/drm/rockchip/rk3066_hdmi.h
++++ b/drivers/gpu/drm/rockchip/rk3066_hdmi.h
+@@ -55,6 +55,7 @@
+ #define HDMI_EXT_VTOTAL_L			0x0e4
+ #define HDMI_EXT_VTOTAL_H			0x0e8
+ #define HDMI_AV_CTRL2				0x0ec
++#define HDMI_CSC_ENABLE				BIT(0)
+ #define HDMI_EXT_VBLANK_L			0x0f4
+ #define HDMI_EXT_VBLANK_H			0x10c
+ #define HDMI_EXT_VDELAY				0x0f8
+--- a/drivers/gpu/drm/rockchip/rk3066_hdmi.c
++++ b/drivers/gpu/drm/rockchip/rk3066_hdmi.c
+@@ -528,6 +528,15 @@
+ 		    HDMI_VIDEO_INPUT_COLOR_RGB);
+ 	hdmi_writeb(hdmi, HDMI_DEEP_COLOR_MODE, 0x20);
+ 
++	/*
++	 * The RGB -> YCbCr converter may have been left on (e.g. by the vendor
++	 * kernel, which sends YCbCr): the picture would be YCbCr announced as RGB.
++	 */
++	if (hdmi_readb(hdmi, HDMI_AV_CTRL2) & HDMI_CSC_ENABLE) {
++		dev_info(hdmi->dev, "color space converter was on: turning it off\n");
++		hdmi_modb(hdmi, HDMI_AV_CTRL2, HDMI_CSC_ENABLE, 0);
++	}
++
+ 	rk3066_hdmi_config_video_timing(hdmi, mode);
+ 
+ 	if (display->is_hdmi) {
+@@ -922,9 +931,11 @@
+ 	int irq;
+ 	int ret;
+ 
+-	hdmi = devm_kzalloc(dev, sizeof(*hdmi), GFP_KERNEL);
+-	if (!hdmi)
+-		return -ENOMEM;
++	/* the bridge is reference counted: allocated with the DRM bridge helper */
++	hdmi = devm_drm_bridge_alloc(dev, struct rk3066_hdmi, bridge,
++				     &rk3066_hdmi_bridge_funcs);
++	if (IS_ERR(hdmi))
++		return PTR_ERR(hdmi);
+ 
+ 	hdmi->dev = dev;
+ 	hdmi->drm_dev = drm;
