@@ -49,7 +49,7 @@ Other files in `stickos/kernel/`:
 | File | |
 |---|---|
 | `try` | the new kernel at the next start only. Empty: `stick.dtb`; otherwise names of `.dtb` files, one per line, one for each start. A line is removed (and written to `tried`) before jumping; the list ends when a start reaches StickOS. After a failed start, switch the stick off and on: the next line, or the stock kernel, starts. |
-| `debug` | empty file: SD tests in the initrd (reading only, then writing) and diagnostics in `new.sh` |
+| `debug` | empty file: full-screen colours during the jump, SD tests in the initrd (reading only, then writing) and diagnostics in `new.sh` |
 | `watchdog` | empty file: the watchdog resets the stick about 28 s after the jump if the new kernel hangs; its log left in RAM is saved as `stickos/logs/ramoops.bin` |
 
 Logs in `stickos/logs/`: `kjump.log`, `dmesg-stock.log`, `dmesg-new.log`, and with `debug`
@@ -63,9 +63,9 @@ reserves 12 MB of contiguous memory. `kjump` puts kernel, device tree and initrd
 then runs a small piece of code in kernel mode through an unused system call: it turns
 off interrupts, caches and MMU, stops the USB DMA, puts the interrupt controller back to
 its reset state and jumps to the new kernel. It refuses to run on any other kernel than
-the stock one (it checks the version and the system call table). The whole screen turns
-into a colour to show how far the jump got: red = kernel mode, green = caches and MMU
-off, blue = images copied, kernel about to start.
+the stock one (it checks the version and the system call table). With `debug` (`kjump -c`)
+the whole screen turns into a colour to show how far the jump got: red = kernel mode,
+green = caches and MMU off, blue = images copied, kernel about to start.
 
 The start takes the time of the stock kernel plus a few seconds.
 

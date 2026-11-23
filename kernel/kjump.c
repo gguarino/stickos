@@ -15,8 +15,9 @@
  *  - one unused entry of the kernel's system call table is replaced through /dev/mem and
  *    the system call is invoked: the code runs in kernel mode, turns off interrupts, caches
  *    and MMU, quiesces USB DMA, copies the images to their final place and jumps.
- *  - the code fills the screen with a colour: a blocked start shows how far it got.
- *    red = kernel mode reached, green = MMU and caches off, blue = images copied.
+ *  - with -c the code fills the screen with a colour (and waits a second): a blocked start
+ *    shows how far it got. red = kernel mode reached, green = MMU and caches off,
+ *    blue = images copied.
  */
 #define _GNU_SOURCE
 #include <errno.h>
@@ -309,8 +310,14 @@ static void table_set(unsigned nr, uint32_t v)
 
 int main(int argc, char **argv)
 {
-    int wd = argc > 1 && !strcmp(argv[1], "-w");
-    if (wd) {
+    int wd = 0, colours = 0;
+    for (;;) {
+        if (argc > 1 && !strcmp(argv[1], "-w"))
+            wd = 1;
+        else if (argc > 1 && !strcmp(argv[1], "-c"))
+            colours = 1;
+        else
+            break;
         argv++;
         argc--;
     }
@@ -319,7 +326,7 @@ int main(int argc, char **argv)
     if (argc == 3 && !strcmp(argv[1], "-d"))
         return dump(argv[2]);
     if (!test && argc != 4) {
-        fprintf(stderr, "usage: kjump [-t] ZIMAGE DTB INITRD\n");
+        fprintf(stderr, "usage: kjump [-w] [-c] ZIMAGE DTB INITRD | -t | -d FILE\n");
         return 2;
     }
     struct utsname u;
@@ -406,7 +413,7 @@ int main(int argc, char **argv)
     struct params p = { 0 };
     uint32_t n = 0, base = (uint32_t)(uintptr_t)pp + offsetof(struct params, list);
     p.pl310 = PL310;
-    p.fb = FBSHOW;
+    p.fb = colours ? FBSHOW : 0;
     p.entry = Z_DST;
     p.dtb = D_DST;
     p.pokes = base;
