@@ -30,6 +30,7 @@
 #include <sys/ioctl.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
+#include <sys/utsname.h>
 #include <sys/wait.h>
 #include <time.h>
 #include <unistd.h>
@@ -1545,7 +1546,13 @@ static void info_screen(void)
     text(40, 100, 2, C_TEXT, l);
     text(40, 160, 2, C_DIM, T("ROMs: folder roms/<system> on the SD card"));
     text(40, 200, 2, C_DIM, T("In game: SELECT + START = pause menu"));
-    int y = 270;
+    struct utsname u;
+    if (uname(&u) == 0) {
+        snprintf(l, sizeof(l), "Linux %s %s", u.release, u.version);
+        l[74] = 0;                          /* fits on one line */
+        text(40, 240, 2, C_DIM, l);
+    }
+    int y = 300;
     text(40, y, 2, C_TEXT, T("Connected joypads:"));
     for (int j = 0; j < npads; j++) {
         y += 40;
